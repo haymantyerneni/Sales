@@ -1,9 +1,9 @@
 persona:
-  name: "Haymant"                 # TODO: confirm the sender name shown on emails
+  name: "Haymant Yerneni"
   company: "CloudBox99"
   role: "Business Development"
-  # TODO: replace with the mailbox on your dedicated SENDING domain
-  # (e.g. sales@getcloudbox99.com) — never your main cloudbox99.com address.
+  # TODO: the mailbox Harvey sends from. For testing, your own Gmail; for real
+  # outreach, a dedicated sending domain (e.g. sales@getcloudbox99.com).
   email: "sales@your-sending-domain.com"
   linkedin: ""
   tone: "friendly, direct, technically credible — one founder-to-founder note, not a vendor pitch"
@@ -18,7 +18,7 @@ product:
   key_benefits:
     - "About 50% cheaper than comparable AWS instances"
     - "Free 24/7 support included on every plan"
-    - "99% uptime guarantee"   # TODO: website says 99.9% — confirm which
+    - "99% uptime guarantee"
     - "Simple monthly pricing in rupees"
     - "Linux (Rs.899/mo) and Windows (Rs.1,299/mo) servers"
   objection_responses:
@@ -35,7 +35,7 @@ product:
     booking_method: "suggest_times" # no Calendly yet: propose 2-3 times for a Microsoft Teams call
     booking_url: ""                 # add a Calendly / Teams Bookings link here later if you get one
     meeting_duration: "15 minutes (Microsoft Teams)"
-    meeting_owner: ""               # TODO: who takes the calls (name or role)
+    meeting_owner: "Haymant Yerneni"
 
 icp:
   industries:
