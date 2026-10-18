@@ -1466,20 +1466,31 @@ Respond ONLY with the JSON array."""
         keywords = self._signal_role_keywords()
         if not keywords:
             return 0
-        search_term = keywords[0]
-        geo = self.config.icp.geography[0] if self.config.icp.geography else ""
+        # Rotate so every signal role and every city gets searched over time,
+        # not just the first of each.
+        search_term = random.choice(keywords)
+        geo = random.choice(self.config.icp.geography) if self.config.icp.geography else ""
+        sites, country = self._job_board_market(geo)
 
-        logger.info(f"Scout: Searching job boards for '{search_term}' roles...")
+        logger.info(
+            f"Scout: Searching job boards ({', '.join(sites)}) for "
+            f"'{search_term}' roles in {geo or 'any location'}..."
+        )
         loop = asyncio.get_event_loop()
 
         def _search():
-            return scrape_jobs(
-                site_name=["indeed"],
+            kwargs = dict(
                 search_term=search_term,
                 location=geo,
                 results_wanted=15,
                 hours_old=24 * 14,  # fresh signal only: last two weeks
             )
+            try:
+                return scrape_jobs(site_name=sites, country_indeed=country, **kwargs)
+            except ValueError:
+                # Country (or site) unknown to this jobspy version — fall
+                # back to the original US Indeed search rather than nothing.
+                return scrape_jobs(site_name=["indeed"], **kwargs)
 
         try:
             df = await asyncio.wait_for(
@@ -1579,6 +1590,23 @@ Respond ONLY with the JSON array."""
         return count
 
     # ── Buying signals (tech stack + hiring) ──
+
+    @staticmethod
+    def _job_board_market(geo: str) -> tuple[list[str], str]:
+        """Job boards and Indeed country for a geography entry.
+
+        The country is the last comma-separated part ("Bengaluru, India" →
+        "india"). Indeed defaults to the US site, so without this a non-US
+        ICP only ever sees US postings. India also gets Naukri, its largest
+        job board.
+        """
+        country = geo.rsplit(",", 1)[-1].strip().lower() if geo else ""
+        if country in ("", "us", "usa", "united states") or len(country) == 2:
+            # Bare city or US state code ("Denver, CO") → US Indeed.
+            return ["indeed"], "usa"
+        if country == "india":
+            return ["indeed", "naukri"], country
+        return ["indeed"], country
 
     def _signal_role_keywords(self) -> list[str]:
         """Role keywords that indicate in-market intent (config or ICP titles)."""

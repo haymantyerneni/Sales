@@ -1,59 +1,84 @@
 persona:
-  name: "Harvey"
-  company: "Your Company"
+  name: "Haymant"                 # TODO: confirm the sender name shown on emails
+  company: "CloudBox99"
   role: "Business Development"
-  email: "harvey@yourcompany.com"
-  linkedin: "linkedin.com/in/harvey-yourcompany"
-  tone: "professional, consultative, confident"
+  # TODO: replace with the mailbox on your dedicated SENDING domain
+  # (e.g. sales@getcloudbox99.com) — never your main cloudbox99.com address.
+  email: "sales@your-sending-domain.com"
+  linkedin: ""
+  tone: "friendly, direct, technically credible — one founder-to-founder note, not a vendor pitch"
 
 product:
-  name: "Your Product"
-  description: "Describe what your product does and who it's for"
-  pricing: "Starting at $X/mo"
+  name: "CloudBox99 Cloud Servers"
+  description: >-
+    Affordable cloud VPS hosting (Linux and Windows) for Indian startups and
+    SaaS teams, with free 24/7 support and a 99% uptime guarantee — at
+    roughly half the cost of comparable AWS instances.
+  pricing: "Linux VPS from Rs.899/mo, Windows VPS from Rs.1,299/mo"
   key_benefits:
-    - "Benefit 1"
-    - "Benefit 2"
-    - "Benefit 3"
+    - "About 50% cheaper than comparable AWS instances"
+    - "Free 24/7 support included on every plan"
+    - "99% uptime guarantee"   # TODO: website says 99.9% — confirm which
+    - "Simple monthly pricing in rupees"
+    - "Linux (Rs.899/mo) and Windows (Rs.1,299/mo) servers"
   objection_responses:
-    "too expensive": "I understand budget is important. Most of our clients see ROI within 30 days..."
-    "already have a solution": "That makes sense. Curious — what's the one thing you wish it did better?"
-    "not interested": "No worries at all. Mind if I ask what your current approach looks like?"
+    "too expensive": "Fair — that's usually what we hear before the comparison. Our Linux servers start at Rs.899/mo and typically come in around half of the equivalent AWS bill. Happy to price your current setup side by side."
+    "already on aws": "Makes sense, most of the teams we talk to are. Not asking you to move everything — a lot of them start by shifting one staging or internal server and comparing the bill after a month."
+    "already have a solution": "Totally fair. Curious — is it the bill, the support, or neither that you'd change if you could?"
+    "migration is risky / no time": "Understood. That's why we'd start with a 7-day free trial on a non-critical server, so you can compare before moving anything that matters."
+    "is support really free": "Yes — 24/7 support is included on every plan, no paid tier."
+    "not interested": "No worries at all — I won't follow up again."
   offer:
-    primary: ""                    # Main offer (e.g., "Monthly subscription starting at $99/mo")
-    entry: ""                      # Low-commitment entry (e.g., "14-day free trial", "Free audit")
-    goal: "book_call"              # Goal of outreach: book_call, start_trial, get_reply
-    booking_method: "calendar_link" # calendar_link, suggest_times, ask_preference
-    booking_url: ""                # Calendar link URL (if using calendar_link method)
-    meeting_duration: "15 minutes" # How long the call is
-    meeting_owner: ""              # Who takes the meeting (name or role)
+    primary: "Cloud VPS — Linux from Rs.899/mo, Windows from Rs.1,299/mo"
+    entry: "7-day free trial"
+    goal: "start_trial"            # get them on the free trial, or onto a short call
+    booking_method: "suggest_times" # no Calendly yet: propose 2-3 times for a Microsoft Teams call
+    booking_url: ""                 # add a Calendly / Teams Bookings link here later if you get one
+    meeting_duration: "15 minutes (Microsoft Teams)"
+    meeting_owner: ""               # TODO: who takes the calls (name or role)
 
 icp:
   industries:
     - "SaaS"
-    - "Marketing Agency"
-  company_size: "10-200 employees"
+    - "Tech startup"
+    - "Software development"
+    - "Web and mobile app development"
+  company_size: "5-200 employees"
   titles:
-    - "VP Marketing"
-    - "Head of Growth"
-    - "CMO"
-    - "Director of Marketing"
+    - "CTO"
+    - "Co-founder"
+    - "Founder"
+    - "VP Engineering"
+    - "Head of Engineering"
+    - "Engineering Manager"
+    - "DevOps Lead"
   geography:
-    - "United States"
-  # Roles that signal a company is in-market RIGHT NOW (a company hiring a
-  # "Head of Growth" is shopping for growth tooling). Used for careers-page
-  # scanning and job-board discovery. Empty = fall back to titles above.
-  hiring_signals: []
+    - "Bengaluru, India"
+    - "Pune, India"
+    - "Hyderabad, India"
+    - "Chennai, India"
+    - "Gurugram, India"
+    - "Noida, India"
+    - "Mumbai, India"
+  # A startup hiring for these roles is dealing with servers RIGHT NOW —
+  # the strongest reason to email them this week.
+  hiring_signals:
+    - "devops engineer"
+    - "cloud engineer"
+    - "site reliability engineer"
+    - "system administrator"
+    - "aws engineer"
 
 channels:
   email:
     enabled: true
     provider: "gmail"          # gmail (recommended) | smtp | instantly
-    max_daily_sends: 50
-    require_approval: true      # native providers: emails wait in the Outbox
+    max_daily_sends: 20        # start low while the new sending domain warms up
+    require_approval: true      # every email waits in the Outbox for a human
     send_to_risky: false        # also send to catch-all domains (off = safest)
     max_bounce_rate: 0.05       # pause all sending if bounces exceed this
   linkedin:
-    enabled: true
+    enabled: false             # LinkedIn automation breaks LinkedIn's terms; keep off
     max_daily_connections: 20
     max_daily_messages: 10
 
@@ -61,6 +86,6 @@ usage:
   max_daily_claude_percent: 80
   heartbeat_interval_minutes: 15
   quiet_hours:
-    start: "22:00"
-    end: "07:00"
-    timezone: "America/New_York"
+    start: "20:00"
+    end: "09:00"
+    timezone: "Asia/Kolkata"
