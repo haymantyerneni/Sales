@@ -179,7 +179,7 @@ async def get_setup_status():
     config_path = _resolve_config_file()
     if config_path.exists():
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 cfg = yaml.safe_load(f)
             company = cfg.get("persona", {}).get("company", "")
             product = cfg.get("product", {}).get("name", "")
@@ -239,7 +239,7 @@ async def get_setup_status():
 def _current_provider() -> str:
     """Read channels.email.provider from the active config (best-effort)."""
     try:
-        with open(_resolve_config_file()) as f:
+        with open(_resolve_config_file(), encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
         return ((cfg.get("channels") or {}).get("email") or {}).get("provider", "instantly")
     except Exception:

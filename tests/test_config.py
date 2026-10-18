@@ -59,3 +59,22 @@ def test_offer_config_defaults():
     assert config.product.offer.goal == "book_call"
     assert config.product.offer.booking_method == "calendar_link"
     assert config.product.offer.meeting_duration == "15 minutes"
+
+
+def test_load_config_reads_utf8_regardless_of_locale(monkeypatch, tmp_path):
+    """Windows defaults to cp1252; harvey.yaml (and skills) are UTF-8."""
+    import builtins
+    from harvey.config import load_config
+
+    path = tmp_path / "harvey.yaml"
+    path.write_bytes(open("harvey.yaml", "rb").read())
+    real_open = builtins.open
+
+    def cp1252_default_open(file, mode="r", *args, encoding=None, **kw):
+        if "b" not in mode and encoding is None:
+            encoding = "cp1252"
+        return real_open(file, mode, *args, encoding=encoding, **kw)
+
+    monkeypatch.setattr(builtins, "open", cp1252_default_open)
+    cfg = load_config(str(path))
+    assert "—" in cfg.persona.tone

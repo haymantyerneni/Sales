@@ -117,7 +117,8 @@ async def export_prospects_csv(
     )
     text = to_csv(rows)
     if out_path:
-        with open(out_path, "w", newline="") as f:
+        # utf-8-sig: Excel on Windows needs the BOM to show non-ASCII names.
+        with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
             f.write(text)
         logger.info(f"Exported {len(rows)} prospects to {out_path}")
     return len(rows), text
