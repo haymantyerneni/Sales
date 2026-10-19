@@ -66,6 +66,10 @@ class ICPConfig(BaseModel):
     #   "Denver, CO": "39.7392,-104.9903,50"
     # Without one, listings providers can only match on the business name.
     geo_coordinates: dict[str, str] = {}
+    # Hard filter: when set (e.g. "India"), a company is kept only if its own
+    # website shows evidence of being based there — see harvey/geo_filter.py.
+    # Empty = no filter; `geography` alone only biases searches.
+    required_country: str = ""
 
 
 class EmailChannelConfig(BaseModel):

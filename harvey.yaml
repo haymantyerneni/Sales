@@ -60,6 +60,10 @@ icp:
     - "Gurugram, India"
     - "Noida, India"
     - "Mumbai, India"
+  # Hard filter: only keep companies whose website proves they're in India
+  # (.in domain, +91 phone, GSTIN/CIN, "Pvt Ltd", rupee pricing, or an Indian
+  # address with PIN code). Everything else is skipped and logged.
+  required_country: "India"
   # A startup hiring for these roles is dealing with servers RIGHT NOW —
   # the strongest reason to email them this week.
   hiring_signals:

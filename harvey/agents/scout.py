@@ -37,6 +37,7 @@ from bs4 import BeautifulSoup
 
 from harvey.brain import Brain
 from harvey.config import HarveyConfig, EnvConfig
+from harvey.geo_filter import EVIDENCE_PATHS, country_evidence, mentions_country
 from harvey.integrations.email_finder import find_email
 from harvey.integrations.linkedin import LinkedInAutomation
 from harvey.models.company import Company
@@ -116,6 +117,9 @@ class Scout:
         # In-memory dedup guards, reset each cycle.
         self._seen_prospect_keys: set[str] = set()
         self._seen_domains: set[str] = set()
+        # Domains that failed icp.required_country. Kept across cycles so a
+        # foreign company that keeps surfacing isn't re-fetched every time.
+        self._country_rejected: set[str] = set()
 
     async def run(self):
         """Main prospecting flow: find leads matching ICP."""
@@ -514,6 +518,9 @@ class Scout:
             domain = (company.get("domain") or "").strip()
             if not domain:
                 continue
+            # Check before spending a Hunter search on a foreign company.
+            if not await self._in_required_country(domain):
+                continue
 
             if await hunter_searches_remaining(self.state) <= 0:
                 break
@@ -601,6 +608,13 @@ class Scout:
         for company in companies:
             domain = (company.get("domain") or "").strip()
             if not domain:
+                continue
+            if not await self._in_required_country(domain):
+                # Rotate it out like any other checked company.
+                try:
+                    await self.state.mark_prospects_checked(company["id"])
+                except Exception as e:
+                    logger.debug(f"mark_prospects_checked failed for {domain}: {e}")
                 continue
 
             contacts = await self._contacts_from_company(
@@ -754,6 +768,12 @@ class Scout:
             for url, snippet in results:
                 if "/in/" not in url:
                     continue
+                # No company site to check here, so the profile's own
+                # snippet has to name the country (or, for India, a city).
+                if not mentions_country(
+                    getattr(self.config.icp, "required_country", ""), snippet
+                ):
+                    continue
 
                 parsed = self._parse_linkedin_url(url, snippet)
                 if not parsed:
@@ -828,6 +848,8 @@ class Scout:
         all_contacts = []
         for company in companies:
             domain = company["domain"]
+            if not await self._in_required_country(domain, company.get("_homepage_html", "")):
+                continue
             company_id = await self._ensure_company(
                 name=company.get("name") or self._domain_to_name(domain),
                 domain=domain,
@@ -1217,6 +1239,36 @@ Respond ONLY with the JSON array."""
 
     # ── Shared utilities ──
 
+    async def _in_required_country(self, domain: str, homepage_html: str = "") -> bool:
+        """Hard filter: keep a company only if its own site shows it's based
+        in `icp.required_country` (no-op when unset). Checks the homepage
+        first, then a few contact/about pages.
+        """
+        country = (getattr(self.config.icp, "required_country", "") or "").strip()
+        if not country:
+            return True
+        if domain in self._country_rejected:
+            return False
+
+        reason = country_evidence(country, domain, homepage_html)
+        if not reason:
+            base, home = await self._resolve_base_url(domain)
+            if home is not None and not homepage_html:
+                reason = country_evidence(country, domain, home.text)
+            for path in EVIDENCE_PATHS:
+                if reason or not base:
+                    break
+                page = await self._fetch(f"{base}{path}", timeout=SCRAPE_TIMEOUT, retries=1)
+                if page is not None:
+                    reason = country_evidence(country, domain, page.text)
+
+        if reason:
+            logger.debug(f"Scout: {domain} is in {country} ({reason}).")
+            return True
+        self._country_rejected.add(domain)
+        logger.info(f"Scout: Skipping {domain} — no sign on its site that it's based in {country}.")
+        return False
+
     async def _ensure_company(
         self,
         name: str,
@@ -1534,9 +1586,11 @@ Respond ONLY with the JSON array."""
                 self._seen_domains.add(domain)
                 continue
             self._seen_domains.add(domain)
-            companies_used += 1
 
             info = await self._scrape_company_info(domain)
+            if not await self._in_required_country(domain, info.get("_homepage_html", "")):
+                continue
+            companies_used += 1
             company_id = await self._ensure_company(
                 name=info.get("name") or company_name,
                 domain=domain,
