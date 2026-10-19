@@ -19,6 +19,11 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("harvey")
+# httpx logs every request URL at INFO, and the verifier/Hunter APIs take
+# their API key as a query parameter — so the default level printed secret
+# keys to the console and the dashboard's log file. Warnings still show.
+for _noisy in ("httpx", "httpcore"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 # Backoff for consecutive failed cycles: 60s, 120s, 240s, ... capped at 15 min
 ERROR_BACKOFF_BASE = 60

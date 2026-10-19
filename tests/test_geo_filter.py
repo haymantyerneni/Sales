@@ -127,3 +127,4 @@ async def test_scout_filter_off_when_unset():
         assert await scout._in_required_country("anything.com")
     finally:
         scout.config.icp.required_country = "India"
+
