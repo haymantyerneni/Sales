@@ -23,6 +23,8 @@ from email.utils import make_msgid, parseaddr
 
 import aiosmtplib
 
+from harvey.signature import from_header
+
 from harvey.integrations.mail_provider import (
     InboundMessage,
     MailProvider,
@@ -61,7 +63,7 @@ class SmtpImapProvider(MailProvider):
         persona = self.config.persona
         msg = EmailMessage()
         msg["To"] = to_email
-        msg["From"] = f"{persona.name} <{persona.email or self.smtp_user}>"
+        msg["From"] = from_header(persona, self.smtp_user)
         msg["Subject"] = subject
         message_id = make_msgid(domain=(persona.email or self.smtp_user).split("@")[-1])
         msg["Message-ID"] = message_id

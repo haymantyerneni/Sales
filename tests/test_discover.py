@@ -689,3 +689,33 @@ async def test_an_unmappable_term_is_reported_not_silently_skipped(
                                                      coordinate="1,2,40")])
     assert report.found == 0
     assert report.errors and "no category" in report.errors[0]
+
+
+# ── Country fence ──
+
+
+def test_outside_country_rules():
+    assert D.outside_country("IN", "acme.co.uk")
+    assert D.outside_country("IN", "acme.com.au")
+    assert D.outside_country("IN", "acme.com", country_code="US")
+    assert not D.outside_country("IN", "acme.in")
+    assert not D.outside_country("IN", "acme.co.in")
+    assert not D.outside_country("IN", "acme.com")
+    assert not D.outside_country("IN", "acme.io")
+    assert not D.outside_country("IN", "acme.com", country_code="IN")
+    assert not D.outside_country("", "acme.co.uk"), "no country = no fence"
+    assert not D.outside_country("GB", "acme.co.uk")
+
+
+@pytest.mark.asyncio
+async def test_businesses_outside_icp_country_are_skipped(state, config, register):
+    register(FakeProvider([[
+        biz(name="Hyd Clinic", domain="hydclinic.in"),
+        biz(name="UK Agency", domain="ukagency.co.uk"),
+        biz(name="US Firm", domain="usfirm.com", country_code="US"),
+        biz(name="Generic", domain="generic.com"),
+    ]]))
+    report = await D.run_discovery(state, config, "fake", [
+        D.DiscoveryQuery(term="clinic", location="Hyderabad", country="IN")])
+    assert report.new_companies == 2
+    assert report.foreign == 2

@@ -425,7 +425,7 @@ def cmd_outbox(args):
         print("  " + "=" * 60)
         for item in pending:
             print(f"\n  [{item['id']}] step {item['step']} ({item['kind']}) "
-                  f"→ {item['to_email']}  (send {item['send_at'][:16]})")
+                  f"→ {item['to_email']}  (send {item['send_at'][:16]} UTC)")
             print(f"  Subject: {item['subject']}")
             body_preview = (item["body"][:200] + "...") if len(item["body"]) > 200 else item["body"]
             for line in body_preview.splitlines():
@@ -531,6 +531,8 @@ def cmd_discover(args):
         print(f"    {r.get('new_companies', 0)} new companies, "
               f"{r.get('known_companies', 0)} already known")
         print(f"    {r.get('junk', 0)} filtered out as directories/aggregators")
+        if r.get("foreign"):
+            print(f"    {r['foreign']} skipped as outside icp.country")
         print(f"    {r.get('observations', 0)} observations recorded")
         print(f"    actual cost: ${r.get('actual_cost', 0):.4f}")
         if r.get("stopped"):

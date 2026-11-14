@@ -349,3 +349,31 @@ async def test_inbound_dedup(state):
     await handler._run_native()   # same message again → ignored via dedup
     second = await state.get_conversations_by_status("closed")
     assert len(first) == len(second) == 1
+
+
+def test_weekend_hold_uses_local_timezone():
+    from types import SimpleNamespace as NS
+    from harvey.agents.sender import Sender
+    s = Sender.__new__(Sender)
+    s.config = NS(channels=NS(email=NS(weekdays_only=True)),
+                  usage=NS(quiet_hours=NS(timezone="Asia/Kolkata")))
+    # Friday 20:00 UTC is Saturday 01:30 in Kolkata.
+    assert s._is_weekend_hold(datetime(2026, 11, 13, 20, 0, tzinfo=timezone.utc))
+    # Sunday 19:00 UTC is Monday 00:30 in Kolkata.
+    assert not s._is_weekend_hold(datetime(2026, 11, 15, 19, 0, tzinfo=timezone.utc))
+    s.config.channels.email.weekdays_only = False
+    assert not s._is_weekend_hold(datetime(2026, 11, 14, 6, 0, tzinfo=timezone.utc))
+
+
+@pytest.mark.asyncio
+async def test_weekend_hold_keeps_cold_email_approved(state, monkeypatch):
+    pid = await seed_prospect(state)
+    await seed_campaign(state, [pid])
+    provider = FakeProvider()
+    sender = make_sender(state, provider, require_approval=False)
+    monkeypatch.setattr(sender, "_is_weekend_hold", lambda now=None: True)
+
+    await sender._run_native()
+
+    assert provider.sent == []
+    assert len(await state.get_outbox(status="approved")) == 2

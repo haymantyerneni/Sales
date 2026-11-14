@@ -1798,7 +1798,11 @@ Respond ONLY with the JSON array."""
         }
         if domain in noise:
             return True
-        return any(domain == n or domain.endswith(f".{n}") for n in noise)
+        if any(domain == n or domain.endswith(f".{n}") for n in noise):
+            return True
+        # Never pursue a company whose domain places it outside icp.country.
+        from harvey.collectors.discover import outside_country
+        return outside_country(getattr(self.config.icp, "country", ""), domain)
 
     def _domain_to_name(self, domain: str) -> str:
         """Convert a domain to a rough company name."""

@@ -21,6 +21,7 @@ from harvey.config import HarveyConfig, EnvConfig
 from harvey.gate import pre_send_check
 from harvey.integrations.instantly import InstantlyClient
 from harvey.integrations.mail_provider import NATIVE_PROVIDERS, get_mail_provider
+from harvey.signature import apply_signature, placeholders
 from harvey.state import StateManager
 
 logger = logging.getLogger("harvey.sender")
@@ -46,6 +47,14 @@ SENDABLE_STATUSES = {"new", "queued"}
 # "risky" (catch-all domains) is opt-in via config. Never send to a "guess"
 # or "invalid" address — that bounces and burns the sending domain.
 SENDABLE_EMAIL_STATUSES = {"verified"}
+
+# Email 1 outbox states after which it will never be sent.
+DEAD_STATUSES = {"failed", "rejected", "cancelled"}
+
+
+def re_subject(subject: str) -> str:
+    subject = (subject or "").strip()
+    return subject if subject.lower().startswith("re:") else f"Re: {subject}"
 SENDABLE_EMAIL_STATUSES_WITH_RISKY = {"verified", "risky"}
 
 
@@ -390,7 +399,9 @@ class Sender:
                     step=step.step,
                     to_email=email,
                     subject=self._render(step.subject, prospect),
-                    body=self._render(step.body, prospect),
+                    body=apply_signature(
+                        self._render(step.body, prospect), self.config.persona
+                    ),
                     send_at=send_at.isoformat(),
                     status=initial_status,
                     provider=self.provider.name,
@@ -417,6 +428,100 @@ class Sender:
                 details={"campaign": campaign.name, "staged": staged, "mode": mode},
             )
 
+    def _cold_hold_reason(self, now: datetime | None = None) -> str:
+        """Why cold sequence emails must wait right now ('' = they may go)."""
+        if self._is_weekend_hold(now):
+            return "weekend"
+        email_cfg = self.config.channels.email
+        start = getattr(email_cfg, "send_window_start", "") or ""
+        end = getattr(email_cfg, "send_window_end", "") or ""
+        if not (start and end):
+            return ""
+        import pytz
+        from datetime import time as dtime
+        tz = pytz.timezone(self.config.usage.quiet_hours.timezone)
+        local = (now or datetime.now(timezone.utc)).astimezone(tz).time()
+        if dtime.fromisoformat(start) <= local < dtime.fromisoformat(end):
+            return ""
+        return f"outside the {start}-{end} send window"
+
+    def _is_weekend_hold(self, now: datetime | None = None) -> bool:
+        """True on Sat/Sun (local to the quiet-hours timezone) when
+        ``channels.email.weekdays_only`` is set."""
+        if not getattr(self.config.channels.email, "weekdays_only", False):
+            return False
+        import pytz
+        tz = pytz.timezone(self.config.usage.quiet_hours.timezone)
+        local = (now or datetime.now(timezone.utc)).astimezone(tz)
+        return local.weekday() >= 5
+
+    async def _prepare_followup(self, item: dict, prospect) -> dict | None:
+        """Ready a follow-up to send, or return None (wait / cancelled)."""
+        rows = await self.state.get_sequence_rows(item["campaign_id"], item["prospect_id"])
+        first = next((r for r in rows if int(r["step"]) == 1), None)
+        reason = ""
+        if (prospect.email_status or "") == "invalid":
+            reason = "email 1 bounced"
+        elif first is None or first["status"] in DEAD_STATUSES:
+            reason = "email 1 was never sent"
+        if reason:
+            await self.state.update_outbox_item(item["id"], status="cancelled", error=reason)
+            logger.info(f"Sender: cancelled step {item['step']} to {item['to_email']}: {reason}.")
+            return None
+        if first["status"] != "sent":
+            return None  # Email 1 still awaiting approval/sending: wait.
+
+        threaded = {
+            "thread_ref": first.get("thread_ref") or "",
+            "in_reply_to": self._rfc_id(first.get("message_id") or ""),
+            "subject": re_subject(first["subject"]),
+        }
+        changed = {k: v for k, v in threaded.items() if (item.get(k) or "") != v}
+        if changed:
+            await self.state.update_outbox_item(item["id"], **changed)
+            item = {**item, **changed}
+        return item
+
+    @staticmethod
+    def _rfc_id(message_id: str) -> str:
+        """Only a real RFC Message-ID ('<...>') may go in In-Reply-To."""
+        message_id = (message_id or "").strip()
+        return message_id if message_id.startswith("<") and message_id.endswith(">") else ""
+
+    async def _thread_followups(self, first: dict, result):
+        """Email 1 just went out: thread its follow-ups onto it and schedule
+        them from the real send time (day 4, day 10), not from staging."""
+        sent_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        campaign = await self.state.get_campaign(first["campaign_id"])
+        delays = {s.step: max(0, s.delay_days) for s in (campaign.sequence if campaign else [])}
+        staged_first = None
+        try:
+            staged_first = datetime.fromisoformat(first["send_at"])
+        except (TypeError, ValueError):
+            pass
+
+        rows = await self.state.get_sequence_rows(first["campaign_id"], first["prospect_id"])
+        for row in rows:
+            step = int(row["step"])
+            if step <= 1 or row["status"] not in ("pending_review", "approved"):
+                continue
+            if delays:
+                offset = timedelta(days=sum(delays.get(n, 0) for n in range(2, step + 1)))
+            elif staged_first is not None:
+                try:
+                    offset = datetime.fromisoformat(row["send_at"]) - staged_first
+                except (TypeError, ValueError):
+                    offset = timedelta(0)
+            else:
+                offset = timedelta(0)
+            await self.state.update_outbox_item(
+                row["id"],
+                send_at=(sent_at + offset).isoformat(),
+                thread_ref=result.thread_ref or "",
+                in_reply_to=self._rfc_id(result.message_id),
+                subject=re_subject(first["subject"]),
+            )
+
     async def _drain_due(self):
         """Send due, approved outbox items through the provider."""
         if not self.provider.is_configured():
@@ -441,10 +546,16 @@ class Sender:
             return
 
         allow_risky = getattr(self.config.channels.email, "send_to_risky", False)
+        hold_cold = self._cold_hold_reason()
         sent = 0
         for item in due:
             if sent >= budget:
                 break
+
+            # Weekend / send-window hold: cold sequence emails wait (still
+            # approved); replies to people who wrote back are not held.
+            if hold_cold and item["kind"] == "sequence":
+                continue
 
             prospect = await self.state.get_prospect(item["prospect_id"])
             if prospect is None:
@@ -459,6 +570,30 @@ class Sender:
                     item["id"], status="cancelled",
                     error=f"prospect status '{prospect.status}'",
                 )
+                continue
+
+            # Follow-ups go only after this prospect's Email 1 went out, as a
+            # reply in its thread; if Email 1 never will, they are cancelled.
+            if item["kind"] == "sequence" and int(item["step"]) > 1:
+                item = await self._prepare_followup(item, prospect)
+                if item is None:
+                    continue
+
+            # Every email leaves signed; a body edited after staging is
+            # re-signed (idempotent) so what's stored matches what's sent.
+            signed = apply_signature(item["body"], self.config.persona)
+            if signed != item["body"]:
+                await self.state.update_outbox_item(item["id"], body=signed)
+                item = {**item, "body": signed}
+            left = placeholders(item["subject"] + " " + item["body"])
+            if left:
+                await self.state.update_outbox_item(
+                    item["id"], status="failed",
+                    error=f"unfilled placeholder(s) {left[:3]}: fix persona.signature "
+                          "or edit the email, then re-queue",
+                )
+                logger.warning(f"Sender: unfilled placeholder {left} in email to "
+                               f"{item['to_email']}, not sent.")
                 continue
 
             gate = pre_send_check(
@@ -495,6 +630,8 @@ class Sender:
             )
             if prospect.status in ("new", "queued"):
                 await self.state.update_prospect_status(prospect.id, "contacted")
+            if item["kind"] == "sequence" and int(item["step"]) == 1:
+                await self._thread_followups(item, result)
 
             # A sent reply belongs in its conversation thread.
             if item["kind"] == "reply" and item.get("conversation_id"):

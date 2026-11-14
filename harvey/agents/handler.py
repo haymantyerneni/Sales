@@ -15,6 +15,7 @@ from harvey.config import HarveyConfig, EnvConfig
 from harvey.integrations.instantly import InstantlyClient
 from harvey.integrations.mail_provider import NATIVE_PROVIDERS, get_mail_provider
 from harvey.models.conversation import Conversation, Message
+from harvey.signature import apply_signature
 from harvey.state import StateManager
 
 logger = logging.getLogger("harvey.handler")
@@ -423,6 +424,10 @@ class Handler:
     async def _handle_bounce(self, msg):
         """A bounce is a data bug AND a reputation threat. Fix both."""
         outbox_item = await self.state.find_outbox_by_message_id(msg.in_reply_to)
+        if outbox_item is None and msg.thread_ref:
+            # Gmail files the bounce in the original email's thread even when
+            # the NDR carries no usable In-Reply-To header.
+            outbox_item = await self.state.find_sent_outbox_by_thread_ref(msg.thread_ref)
         prospect = None
         if outbox_item:
             prospect = await self.state.get_prospect(outbox_item["prospect_id"])
@@ -483,7 +488,7 @@ class Handler:
             kind="reply",
             to_email=prospect.email,
             subject=subject or "Re: your note",
-            body=response,
+            body=apply_signature(response, self.config.persona),
             send_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
             status="pending_review" if require_approval else "approved",
             provider=self.provider.name if self.provider else "",
@@ -606,7 +611,13 @@ Respond with ONLY the category label, nothing else."""
                     objection_context = f"\nSuggested approach for this objection: {response}"
                     break
 
-        prompt = self.brain.load_prompt("handler", stage=convo.stage)
+        persona = self.config.persona
+        prompt = self.brain.load_prompt(
+            "handler", stage=convo.stage,
+            persona_name=persona.name, persona_role=persona.role,
+            persona_company=persona.company,
+            persona_first_name=(persona.name.split() or [""])[0],
+        )
         if not prompt:
             prompt = f"""You are {self.config.persona.name}, {self.config.persona.role} at {self.config.persona.company}.
 Your tone is: {self.config.persona.tone}
@@ -651,7 +662,13 @@ Write a reply that:"""
 - Makes it easy for them to refer (one-line ask)
 - Under 50 words"""
 
-        prompt += "\n\nWrite ONLY the email body. No subject line, no greeting label, no signature block, no markdown."
+        greeting = (f"Open with \"Hi {prospect.first_name},\" on its own line. "
+                    if prospect.first_name else "Open with \"Hello,\" on its own line. ")
+        prompt += (
+            "\n\n" + greeting +
+            "Write ONLY the email body. No subject line, no sign-off and no signature: "
+            "\"Warm regards,\" and the signature are added automatically. No markdown."
+        )
 
         response = await self.brain.think(
             prompt, session_id="harvey-handler",

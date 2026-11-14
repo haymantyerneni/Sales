@@ -5,6 +5,8 @@ persona:
   email: "harvey@yourcompany.com"
   linkedin: "linkedin.com/in/harvey-yourcompany"
   tone: "professional, consultative, confident"
+  from_name: ""                # display name on outgoing mail; empty = name
+  signature: ""                # plain-text signature appended to every email after "Warm regards,"
 
 product:
   name: "Your Product"
@@ -55,6 +57,9 @@ channels:
     require_approval: true      # native providers: emails wait in the Outbox
     send_to_risky: false        # also send to catch-all domains (off = safest)
     max_bounce_rate: 0.05       # pause all sending if bounces exceed this
+    weekdays_only: false        # hold cold emails on Sat/Sun until Monday
+    send_window_start: ""       # e.g. "09:30" (quiet_hours timezone): cold emails only
+    send_window_end: ""         # e.g. "12:00"; discovery/writing/replies keep running
   linkedin:
     enabled: true
     max_daily_connections: 20

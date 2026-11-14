@@ -31,6 +31,12 @@ class PersonaConfig(BaseModel):
     email: str
     linkedin: str
     tone: str
+    # Display name on outgoing mail ("Haymant Yerneni | CloudBox99").
+    # Empty falls back to `name`.
+    from_name: str = ""
+    # Plain-text signature appended in code to every outgoing email, after
+    # "Warm regards,". Gmail's API never adds the mailbox's own signature.
+    signature: str = ""
 
 
 class OfferConfig(BaseModel):
@@ -88,6 +94,25 @@ class EmailChannelConfig(BaseModel):
     # Kill switch: pause all sending when bounces exceed this fraction of
     # sent mail (measured over the trailing sends). 0 disables the switch.
     max_bounce_rate: float = 0.05
+    # Hold cold-sequence emails on Saturday/Sunday (in the quiet-hours
+    # timezone) until Monday. Replies to engaged prospects still go out.
+    weekdays_only: bool = False
+    # Daily window (HH:MM, quiet-hours timezone) for cold-sequence emails,
+    # e.g. "09:30"-"12:00". Empty = any time outside quiet hours. Only the
+    # sends are held; discovery, writing and reply handling keep running.
+    send_window_start: str = ""
+    send_window_end: str = ""
+
+    @field_validator("send_window_start", "send_window_end")
+    @classmethod
+    def _valid_window(cls, v: str) -> str:
+        v = (v or "").strip()
+        if v:
+            try:
+                _time.fromisoformat(v)
+            except ValueError:
+                raise ValueError(f"'{v}' is not a valid time. Use 24h HH:MM, e.g. '09:30'.")
+        return v
 
     @field_validator("max_daily_sends")
     @classmethod

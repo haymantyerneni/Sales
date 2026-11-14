@@ -100,6 +100,40 @@ def is_junk(domain: str, name: str = "") -> bool:
     return False
 
 
+# ── Country fence ─────────────────────────────────────────────────────
+# `icp.country` steers the search locale, but a locale is a preference, not a
+# fence: a UK agency still ranks for "SaaS startups Hyderabad". When a country
+# is configured, anything that positively says it is elsewhere is dropped.
+# Generic TLDs (.com, .io) prove nothing either way and are kept — the locale
+# and the target cities are what keep those on-market.
+
+# ccTLDs used as generic vanity domains; they say nothing about location.
+VANITY_CCTLDS = frozenset({
+    "io", "ai", "co", "me", "tv", "ly", "gg", "fm", "am", "to", "cc", "ws",
+    "sh", "so", "is", "it", "st", "app", "dev",
+})
+# ISO code -> its ccTLD, where they differ.
+CCTLD_FOR = {"GB": "uk"}
+
+
+def outside_country(country: str, domain: str = "", country_code: str = "") -> bool:
+    """True when this business is positively outside ``country`` (ISO alpha-2)."""
+    country = country.strip().upper() if isinstance(country, str) else ""
+    if not country:
+        return False
+    code = (country_code or "").strip().upper()
+    if code and code != country:
+        return True
+    labels = (domain or "").lower().strip(".").split(".")
+    if len(labels) >= 2:
+        tld = labels[-1]
+        if len(tld) == 2 and tld not in VANITY_CCTLDS:
+            home = CCTLD_FOR.get(country, country.lower())
+            if tld != home:
+                return True
+    return False
+
+
 # ── Geocoding ─────────────────────────────────────────────────────────
 # Listings providers search a radius, not a place name, so "Denver, CO" has to
 # become coordinates. Nominatim allows exactly this (single place lookups at
@@ -184,6 +218,7 @@ class Business:
     phone: str = ""
     address: str = ""
     location: str = ""
+    country_code: str = ""           # ISO alpha-2, when the provider gives one
     category: str = ""
     rating: float | None = None
     review_count: int | None = None
@@ -335,6 +370,7 @@ class DataForSEOListings(DiscoveryProvider):
             phone=item.get("phone") or "",
             address=item.get("address") or "",
             location=city,
+            country_code=addr.get("country_code") or "",
             category=item.get("category") or "",
             rating=rating.get("value"),
             review_count=rating.get("votes_count"),
@@ -599,6 +635,7 @@ class OpenStreetMap(DiscoveryProvider):
                 address=" ".join(x for x in (tags.get("addr:housenumber"),
                                              tags.get("addr:street")) if x),
                 location=city or query.location,
+                country_code=tags.get("addr:country") or "",
                 category=tags.get("craft") or tags.get("shop") or tags.get("office") or "",
                 has_website=bool(site),
                 external_id=f"osm:{el.get('type')}/{el.get('id')}",
@@ -657,6 +694,7 @@ class DiscoveryReport:
     actual_cost: float = 0.0
     found: int = 0
     junk: int = 0
+    foreign: int = 0                 # dropped: outside icp.country
     new_companies: int = 0
     known_companies: int = 0
     observations: int = 0
@@ -669,7 +707,7 @@ class DiscoveryReport:
             "provider": self.provider, "queries": self.queries,
             "estimated_cost": round(self.estimated_cost, 4),
             "actual_cost": round(self.actual_cost, 4),
-            "found": self.found, "junk": self.junk,
+            "found": self.found, "junk": self.junk, "foreign": self.foreign,
             "new_companies": self.new_companies,
             "known_companies": self.known_companies,
             "observations": self.observations,
@@ -797,6 +835,9 @@ async def run_discovery(
                 for biz in found:
                     if is_junk(biz.domain, biz.name):
                         report.junk += 1
+                        continue
+                    if outside_country(query.country, biz.domain, biz.country_code):
+                        report.foreign += 1
                         continue
                     ident = biz.identity()
                     if not ident or ident in seen:

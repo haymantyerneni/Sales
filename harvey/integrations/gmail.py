@@ -25,6 +25,7 @@ from email.utils import parseaddr
 import httpx
 
 from harvey.paths import PROJECT_ROOT
+from harvey.signature import from_header
 from harvey.integrations.mail_provider import (
     InboundMessage,
     MailProvider,
@@ -139,7 +140,7 @@ class GmailProvider(MailProvider):
         msg = EmailMessage()
         persona = self.config.persona
         msg["To"] = to_email
-        msg["From"] = f"{persona.name} <{persona.email}>" if persona.email else persona.name
+        msg["From"] = from_header(persona)
         msg["Subject"] = subject
         if in_reply_to:
             msg["In-Reply-To"] = in_reply_to

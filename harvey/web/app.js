@@ -568,6 +568,7 @@ function renderDiscoverResult(report, running) {
       stat('Already known', report.known_companies || 0) +
       stat('Observations', report.observations || 0) +
       stat('Filtered as junk', report.junk || 0) +
+      (report.foreign ? stat('Outside target country', report.foreign) : '') +
       stat('Actual cost', report.actual_cost ? '$' + report.actual_cost.toFixed(4) : 'free') +
     '</div>' +
     (report.stopped ? '<div class="test-result error" style="margin-top:14px">' +
