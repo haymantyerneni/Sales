@@ -7,6 +7,7 @@ anyone, and that directories never make it in.
 """
 
 import asyncio
+import json
 import os
 import tempfile
 
@@ -438,6 +439,36 @@ async def test_serper_adapter():
     assert out[0].domain == "kettlemanroofing.com" and out[0].rank == 3
     # Junk filtering happens in the run, so the adapter still returns Angi.
     assert out[1].domain == "angi.com"
+
+
+@pytest.mark.asyncio
+async def test_serp_providers_search_from_the_icp_country():
+    """An Indian ICP must be ranked as an Indian searcher sees Google, not
+    from the provider's default (US) market."""
+    seen = []
+
+    def handler(request):
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json=SERPER_RESPONSE if "serper" in str(
+            request.url) else DFS_SERP)
+
+    query = D.DiscoveryQuery(term="it services", location="Pune", country="IN")
+    async with _client(handler) as client:
+        await D.Serper().fetch(client, {"serper_api_key": "k"}, query)
+        await D.DataForSEOSerp().fetch(
+            client, {"dataforseo_login": "u", "dataforseo_password": "p"}, query)
+
+    assert seen[0]["gl"] == "in"
+    assert seen[1][0]["location_name"] == "India"
+
+
+def test_build_queries_carries_the_icp_country(tmp_path):
+    config = type("C", (), {
+        "icp": type("I", (), {"industries": ["it services"], "geography": ["Pune"],
+                              "geo_coordinates": {}, "country": "IN"})(),
+        "product": type("P", (), {"name": "x"})(),
+    })()
+    assert [q.country for q in D.build_queries(config)] == ["IN"]
 
 
 @pytest.mark.asyncio

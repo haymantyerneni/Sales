@@ -208,12 +208,21 @@ class DiscoveryQuery:
     coordinate: str = ""             # "lat,lng,radius_km" for listings providers
     depth: int = 30                  # SERP depth; ignored by listings providers
     limit: int = 100                 # max records to take from one query
+    country: str = ""                # ISO 3166-1 alpha-2, e.g. "IN"; SERP locale
 
     def keyword(self) -> str:
         return f"{self.term} {self.location}".strip()
 
 
 # ── Provider adapters ─────────────────────────────────────────────────
+
+
+# DataForSEO SERP takes a country by name; Serper takes the ISO code directly.
+SERP_COUNTRY_NAMES = {
+    "IN": "India", "US": "United States", "GB": "United Kingdom",
+    "CA": "Canada", "AU": "Australia", "AE": "United Arab Emirates",
+    "SG": "Singapore", "DE": "Germany", "FR": "France",
+}
 
 
 class DiscoveryProvider:
@@ -367,13 +376,23 @@ class DataForSEOSerp(DiscoveryProvider):
     _auth = DataForSEOListings._auth
     base_url = DataForSEOListings.base_url
 
+    @staticmethod
+    def _payload(query) -> dict:
+        payload = {"keyword": query.keyword(), "language_code": "en",
+                   "depth": query.depth, "device": "desktop"}
+        # Without a location Google answers from the provider's default
+        # market, so an Indian ICP would be ranked as a US searcher sees it.
+        name = SERP_COUNTRY_NAMES.get(query.country.upper())
+        if name:
+            payload["location_name"] = name
+        return payload
+
     async def fetch(self, client, env, query):
         r = await client.post(
             f"{self.base_url(env)}/serp/google/organic/live/advanced",
             headers={"Authorization": f"Basic {self._auth(env)}",
                      "Content-Type": "application/json"},
-            json=[{"keyword": query.keyword(), "language_code": "en",
-                   "depth": query.depth, "device": "desktop"}],
+            json=[self._payload(query)],
         )
         r.raise_for_status()
         data = r.json()
@@ -428,7 +447,8 @@ class Serper(DiscoveryProvider):
             "https://google.serper.dev/search",
             headers={"X-API-KEY": env["serper_api_key"],
                      "Content-Type": "application/json"},
-            json={"q": query.keyword(), "num": min(query.depth, 100)},
+            json={"q": query.keyword(), "num": min(query.depth, 100),
+                  **({"gl": query.country.lower()} if query.country else {})},
         )
         r.raise_for_status()
         data = r.json()
@@ -670,10 +690,11 @@ def build_queries(config, cities: list[str] | None = None,
     terms = list(icp.industries) or [config.product.name]
     places = cities if cities is not None else list(icp.geography) or [""]
     coords = getattr(icp, "geo_coordinates", {}) or {}
+    country = getattr(icp, "country", "") or ""
 
     return [
         DiscoveryQuery(term=term, location=place, depth=depth, limit=limit,
-                       coordinate=coords.get(place, ""))
+                       coordinate=coords.get(place, ""), country=country)
         for term in terms
         for place in places
     ]

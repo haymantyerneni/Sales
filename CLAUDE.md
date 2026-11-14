@@ -190,6 +190,8 @@ side by side: what each source does, what it costs, its free tier, and which
 Cities are geocoded automatically (cached forever, one lookup per city), or set
 `icp.geo_coordinates` in harvey.yaml to control the radius:
 `"Denver, CO": "39.7392,-104.9903,50"`.
+For a market outside the US, also set `icp.country` (ISO code, e.g. `"IN"`)
+so the Google-search sources rank results as a searcher in that country sees them.
 
 **Depth 20-30, not 100.** Google removed 100-results-per-page in September 2025,
 so depth 100 is now billed as ten pages at nearly every provider. Below rank 30

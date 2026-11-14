@@ -66,6 +66,9 @@ class ICPConfig(BaseModel):
     #   "Denver, CO": "39.7392,-104.9903,50"
     # Without one, listings providers can only match on the business name.
     geo_coordinates: dict[str, str] = {}
+    # ISO 3166-1 alpha-2 code ("IN", "US"). Search-based discovery asks Google
+    # as a searcher in this country would; empty keeps the provider default.
+    country: str = ""
 
 
 class EmailChannelConfig(BaseModel):
