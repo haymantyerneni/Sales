@@ -42,6 +42,7 @@ while ($true) {
     Note "starting: harvey $($harveyArgs -join ' ')"
     $p = Start-Process -FilePath $exe -ArgumentList $harveyArgs -WorkingDirectory $Root `
         -NoNewWindow -PassThru -RedirectStandardError $crashLog
+    $null = $p.Handle   # keep a handle, or ExitCode comes back empty
     Note "pid $($p.Id)"
     $p.WaitForExit()
     Note "exited with code $($p.ExitCode); restarting in $RestartSeconds s (stderr: $crashLog)"

@@ -116,6 +116,86 @@ def test_domains_free_mail_and_name_match():
     assert name_match("Spotmies", "reaidy.io") == "low"
 
 
+@pytest.mark.parametrize("company,domain,level", [
+    # From the real list: right answers...
+    ("SB Software Services", "sbsoftwareservices.com", "high"),
+    ("Kairos Technologies", "kairostech.com", "high"),
+    ("Colour Moon Technologies", "thecolourmoon.com", "high"),
+    ("Sree Tammina Software Solutions", "tammina.com", "high"),
+    ("Centillion Networks", "centillionsolutions.com", "high"),
+    ("APT IT Solutions", "aptits.com", "medium"),
+    ("ADD Technologies", "addtechno.com", "medium"),
+    ("Tranquil CRM Software", "tranquilglobal.com", "medium"),
+    # ...and the wrong matches the first dry run made.
+    ("INV Technologies", "investing.com", "low"),
+    ("Astin Soft", "microsoft.com", "low"),
+    ("Webchilly Infoways", "wikihow.com", "low"),
+    ("Sandspace Technologies", "powerbi.com", "low"),
+])
+def test_name_match_on_real_list_cases(company, domain, level):
+    assert name_match(company, domain) == level
+
+
+@pytest.mark.parametrize("raw,tidy", [
+    ("WebNApp Studio | Mobile App Development | Web Design Company", "WebNApp Studio"),
+    ("Cedar Ads - Branding and Digital Marketing Agency in Vizag", "Cedar Ads"),
+    ("WEB INDIA | Digital Marketing in Vizag", "Web India"),
+    ("Sree Tammina Software Solutio", "Sree Tammina Software Solutions"),
+    ("THEDIGIFAC SERVICES PVT LTD", "Thedigifac Services"),
+    ("UnoSimple Technologies Pvt.", "UnoSimple Technologies"),
+    ("Growww Tech", "Growww Tech"),                  # not "Technologies"
+    ("Astin Soft Pvt Ltd", "Astin Soft"),
+])
+def test_taglines_and_cut_off_words(raw, tidy):
+    assert tidy_company(raw) == tidy
+
+
+def test_titles_and_credentials_are_not_names():
+    assert split_name("Chaitanya - Founder") == importer.NameResult("Chaitanya", "", "")
+    assert split_name("Ravi Rungta PMP") == importer.NameResult("Ravi", "Rungta", "")
+
+
+@pytest.mark.parametrize("email,name,expect", [
+    ("pinnasiva99@gmail.com", "Siva Prasad P.", ""),
+    ("ramc.krish@yahoo.com", "Ramachandran Krishnamurthy", ""),
+    ("chandumahesh123@gmail.com", "Maheshwara Rao Landa", ""),
+    ("raghoo@growwwtech.com", "Raghoo Bokam", ""),
+    ("info@acme.in", "Ravi Kumar", ""),
+    ("k.j.pradeep@gmail.com", "Jyothi Pradeep Kollipara", "has 'Pradeep' but not 'Jyothi'"),
+    ("sredhar.palla@gmail.com", "Palla Sridhar", "first name is 'Sridhar', not 'Palla'"),
+    ("sreejan0607@gmail.com", "V V K Mahalakshmi", "doesn't contain the name"),
+])
+def test_email_that_doesnt_match_the_name_is_flagged(email, name, expect):
+    flag = importer.email_name_flag(email, split_name(name), name)
+    assert (expect in flag) if expect else flag == ""
+
+
+def test_found_site_must_mention_the_company():
+    assert importer.site_mentions("Kairos Technologies", "Kairos Tech", "")
+    assert importer.site_mentions("Colour Moon Technologies", "", "The Colour Moon builds apps")
+    assert not importer.site_mentions("Ovid Technologies", "Investing.com", "Stock market quotes")
+    # Short names need the whole name on the site.
+    assert not importer.site_mentions("ADD Technologies", "ADD | Attention Deficit Disorder", "")
+    assert importer.site_mentions("ADD Technologies", "ADD Technologies, Hyderabad", "")
+
+
+@pytest.mark.asyncio
+async def test_a_foreign_search_result_is_ignored_not_a_skip(verdicts):
+    # The row is never skipped because of where a search result lives...
+    tools = FakeTools(found={"Creators Touch": ("creators.sa", "high")})
+    r = await plan({"company": "Creators Touch", "name": "Hari", "email": "ct@gmail.com"}, tools)
+    assert r.skip == ""
+    # ...and the real search drops foreign, directory and junk domains.
+    st = importer.SiteTools.__new__(importer.SiteTools)
+    st.searches, st._lock, st.titles = 0, __import__("asyncio").Lock(), {}
+
+    async def results(query):
+        return [("https://creators.sa/", ""), ("https://www.justdial.com/x", ""),
+                ("https://creatorstouch.in/about", "")]
+    st.scout = type("S", (), {"_queries_this_cycle": 0, "_web_search": staticmethod(results)})()
+    assert await st.search_domain("Creators Touch") == ("creatorstouch.in", "high")
+
+
 def test_bing_redirect_links_are_unwrapped_and_gov_sites_ignored():
     import base64
     from harvey.agents.scout import unwrap_bing_redirect

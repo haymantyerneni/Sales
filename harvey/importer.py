@@ -158,16 +158,36 @@ def tidy_company(name: str) -> str:
     s = re.sub(r"\([^)]*\)|\[[^\]]*\]|\{[^}]*\}", " ", s)          # bracketed parts
     s = re.sub(r"\([^)]*$", " ", s)                                   # unclosed "(..."
     s = re.sub(r"^\s*m\s*/\s*s\.?\s*", "", s, flags=re.IGNORECASE)   # "M/s."
+    # Taglines: "WebNApp Studio | Mobile App Development", "Cedar Ads - Branding ..."
+    head = re.split(r"\s+[|–—:-]\s+|\s*\|\s*", s)[0]
+    if re.search(r"[A-Za-z]{2,}", head):
+        s = head
     s = re.sub(r"\bpvt\.?\s*ltd\.?", "Pvt Ltd", s, flags=re.IGNORECASE)
     tokens = s.replace(",", " ").split()
     while len(tokens) > 1 and _is_legal_tail(tokens[-1], tokens[-2] if len(tokens) > 1 else ""):
         tokens.pop()
+    # A cut-off last word ("Software Solutio") is completed.
+    if tokens:
+        last = tokens[-1]
+        for word in COMPLETABLE:
+            # Only clearly cut-off long words ("Solutio"); "Tech", "Soft",
+            # "Infotec" are names people use as they are.
+            if len(last) >= 6 and word.startswith(last.lower()) and word != last.lower() \
+                    and len(word) - len(last) <= 3:
+                tokens[-1] = (word.capitalize() if last[0].isupper() else word)
+                break
     s = " ".join(tokens).strip(" ,.-&/")
     letters = [c for c in s if c.isalpha()]
     if letters and all(c.isupper() for c in letters):
-        # ALL CAPS -> Title Case, keeping short acronyms ("ABC", "IT").
-        s = " ".join(w if len(w) <= 3 else w.capitalize() for w in s.split())
+        # ALL CAPS -> Title Case, keeping acronyms ("SV", "TCS", "IT").
+        s = " ".join(w if len(w) <= 2 or not re.search(r"[AEIOU]", w) else w.capitalize()
+                     for w in s.split())
     return s or (name or "").strip()
+
+
+COMPLETABLE = ("solutions", "technologies", "services", "software", "systems", "consulting",
+               "consultants", "infotech", "enterprises", "industries", "international",
+               "networks", "infrastructure", "engineering")
 
 
 # ── Person names ─────────────────────────────────────────────────────
@@ -222,12 +242,16 @@ def split_name(full: str) -> NameResult:
         return NameResult("", "", "no person name")
     if re.search(r"[@\d]", raw):
         return NameResult("", "", f"name '{raw}' has digits or @")
+    # "Chaitanya - Founder", "Ravi Rungta PMP": the name only.
+    raw_name = re.split(r"\s+[-–—|]\s+", raw)[0]
+    raw_name = " ".join(t for t in raw_name.split()
+                        if t.strip(".,").upper() not in CREDENTIALS or not t.strip(".,").isupper())
     # A short abbreviation with a dot ("Ch.", "Sk.") is an initial, unless
     # it's an honorific ("Dr.", "Mrs.").
     raw_marked = re.sub(
         r"\b([A-Za-z]{2,3})\.",
         lambda m: m.group(0) if m.group(1).lower() in HONORIFICS else m.group(1)[0] + ".",
-        raw)
+        raw_name)
     # Dots separate initials ("V.V.K. Mahalakshmi", "Lakshmi.N").
     tokens = [t.strip(",;") for t in re.sub(r"[.,]", " ", raw_marked).split() if t.strip(",;")]
     while tokens and tokens[0].lower().strip(".") in HONORIFICS and len(tokens) > 1:
@@ -258,6 +282,48 @@ def split_name(full: str) -> NameResult:
     return NameResult(_cap(first), " ".join(_cap(t) for t in rest), flag)
 
 
+CREDENTIALS = {"PMP", "MBA", "PHD", "CFA", "CPA", "CISSP", "CISA", "CISM", "ITIL", "CSM",
+               "ACCA", "BTECH", "MTECH", "BE", "ME", "MCA", "BCA", "CA", "CS", "CMA", "PE"}
+GENERIC_LOCAL = {"info", "contact", "admin", "sales", "hr", "office", "mail", "enquiry",
+                 "enquiries", "support", "hello", "team", "accounts", "careers", "business"}
+
+
+def email_name_flag(email: str, name: NameResult, raw_name: str) -> str:
+    """Flag when the address doesn't look like this person's: a different
+    name in it ("k.j.pradeep" for "Jyothi Pradeep"), or no name at all
+    ("sreejan0607" for "Mahalakshmi"). Never changes the name itself."""
+    import difflib
+    local = (email or "").split("@")[0].lower()
+    segs = re.findall(r"[a-z]+", local)
+    if not segs or not name.first or any(s in GENERIC_LOCAL for s in segs):
+        return ""
+
+    def hit(tok: str) -> int:
+        """Index of the first email segment that matches this name, or -1."""
+        tok = tok.lower()
+        for i, seg in enumerate(segs):
+            if (tok in seg or (len(seg) >= 4 and seg in tok)
+                    or (len(tok) >= 5 and tok[:5] in seg)
+                    or (len(seg) >= 3 and len(tok) >= 3 and seg[:3] == tok[:3])
+                    or difflib.SequenceMatcher(None, seg, tok).ratio() >= 0.8):
+                return i
+        return -1
+    others = [t for t in name.last.split() if len(t) >= 3]
+    where = hit(name.first)
+    found = [(hit(t), t) for t in others if hit(t) >= 0]
+    if where < 0 and found:
+        return (f"email {local}@ has '{found[0][1]}' but not '{name.first}': "
+                "check which name they go by")
+    if where < 0 and not found:
+        return f"email {local}@ doesn't contain the name '{raw_name}': check it's the same person"
+    # "sredhar.palla" for "Palla Sridhar": the name at the start of the
+    # address is usually the first name.
+    if where > 0 and any(i == 0 for i, _ in found):
+        t = next(t for i, t in found if i == 0)
+        return f"email {local}@ suggests the first name is '{_cap(t)}', not '{name.first}'"
+    return ""
+
+
 # ── Domains and websites ─────────────────────────────────────────────
 
 FREE_MAIL = {
@@ -286,7 +352,8 @@ GENERIC_WORDS = {"india", "indian", "technologies", "technology", "tech", "solut
                  "softwares", "infotech", "consulting", "consultants", "consultancy",
                  "private", "the", "and", "of", "global", "enterprises", "enterprise",
                  "industries", "group", "labs", "lab", "company", "co", "international",
-                 "infra", "ventures", "corporation", "it", "info", "digital", "networks"}
+                 "infra", "ventures", "corporation", "it", "info", "digital", "networks",
+                 "soft", "pvt", "ltd", "llp", "limited"}
 
 
 def domain_of(text: str) -> str:
@@ -327,15 +394,43 @@ def name_match(company: str, domain: str) -> str:
     core = [w for w in words if w not in GENERIC_WORDS] or words
     if not label or not core:
         return "low"
-    joined = "".join(core)
-    if len(joined) >= 3 and (joined in label or (len(label) >= 4 and label in "".join(words))):
+    joined, full = "".join(core), "".join(words)
+    # High: the domain IS the name (allowing a leading "the" or a generic
+    # tail): sarasindia, kairostech, thecolourmoon, tammina.
+    if label in (joined, full) or label == "the" + joined:
         return "high"
-    if any(len(w) >= 4 and w in label for w in core):
+    if len(joined) >= 5 and (label.startswith(joined) or label.endswith(joined)):
+        return "high"
+    if len(label) >= 5 and (joined.endswith(label) or joined.startswith(label)) \
+            and len(label) >= 0.5 * len(joined):
+        return "high"
+    # Medium: a clear prefix of the full name (aptits, addtechno), a whole
+    # distinctive word at the start (tranquilglobal), or initials (aipl).
+    if len(label) >= 6 and full.startswith(label):
+        return "medium"
+    if any(len(w) >= 5 and label.startswith(w) for w in core):
         return "medium"
     initials = "".join(w[0] for w in words)
-    if len(initials) >= 2 and label.startswith(initials):
+    if len(initials) >= 2 and label.startswith(initials) and len(label) <= len(initials) + 3:
         return "medium"
     return "low"
+
+
+def site_mentions(company: str, title: str, description: str) -> bool:
+    """Does the site's title/description name this company?"""
+    text = f"{title} {description}".lower()
+    squashed = re.sub(r"[^a-z0-9]", "", text)
+    all_words = re.findall(r"[a-z0-9]+", company.lower())
+    words = [w for w in all_words if w not in GENERIC_WORDS]
+    if not words:
+        return False
+    if all(len(w) < 4 for w in words):
+        # A short name ("ADD", "INV") appears on unrelated sites: the site
+        # must show the whole name ("ADD Technologies").
+        return "".join(all_words) in squashed
+    if "".join(words) in squashed:
+        return True
+    return any(len(w) >= 4 and w in text for w in words)
 
 
 # ── Email verification ───────────────────────────────────────────────
@@ -461,6 +556,7 @@ class SiteTools:
         self.scout = Scout(None, state, config, env)
         self.searches = 0
         self._lock = asyncio.Lock()       # one search at a time, spaced out
+        self.titles: dict[str, str] = {}   # domain -> homepage title
 
     async def search_domain(self, company: str) -> tuple[str, str]:
         """(domain, confidence) of the company's own site, or ("", "")."""
@@ -481,16 +577,18 @@ class SiteTools:
         for url, _ in results[:8]:
             d = domain_of(url)
             if not d or any(h in d for h in DIRECTORY_HOSTS) or is_free_mail(d) \
-                    or is_institutional(d):
+                    or is_institutional(d) or _outside_india(d, ""):
                 continue
             d = registrable(d)
             if d not in candidates:
                 candidates.append(d)
+        # Only a result whose domain matches the name counts; anything else
+        # is "not found" (search engines pad obscure names with junk).
         for d in candidates[:5]:
             m = name_match(company, d)
             if m in ("high", "medium"):
                 return d, m
-        return (candidates[0], "low") if candidates else ("", "")
+        return "", ""
 
     async def read_site(self, domain: str) -> tuple[bool, str]:
         """(reachable, description)."""
@@ -499,6 +597,7 @@ class SiteTools:
         except Exception:
             return False, ""
         reachable = "_homepage_html" in info
+        self.titles[domain] = (info.get("name") or "").strip()
         return reachable, (info.get("description") or "").strip()
 
 
@@ -542,6 +641,10 @@ async def plan_row(rec: dict, tools: SiteTools, env, smtp_ok: bool,
                 notes=rec.get("notes", ""))
     if name.flag:
         r.flags.append(f"name unclear: {name.flag}")
+    else:
+        mismatch = email_name_flag(email, name, rec.get("name", ""))
+        if mismatch:
+            r.flags.append(f"name unclear: {mismatch}")
     if not company:
         r.flags.append("no company name")
 
@@ -603,7 +706,9 @@ async def plan_row(rec: dict, tools: SiteTools, env, smtp_ok: bool,
         else:
             r.website_source = "not found"
 
-    if r.website and not r.skip:
+    # Only the person's own address (or a website you gave) can rule a row
+    # out as non-Indian; a search result never does.
+    if r.website and not r.skip and r.website_source != "name search":
         r.skip = _outside_india(r.website if r.website_confidence != "low" else "", "")
         if r.skip:
             r.decide()
@@ -611,7 +716,14 @@ async def plan_row(rec: dict, tools: SiteTools, env, smtp_ok: bool,
 
     if r.website and r.website_confidence in ("high", "medium"):
         reachable, desc = await tools.read_site(r.website)
-        if reachable and desc:
+        title = getattr(tools, "titles", {}).get(r.website, "")
+        if r.website_source == "name search" and not site_mentions(r.company, title, desc):
+            # A search result must show it's this company before we write
+            # anything from it.
+            why = "couldn't be opened" if not reachable else f"doesn't mention '{r.company}'"
+            r.flags.append(f"low-confidence website: {r.website} {why}")
+            r.website_confidence = "low"
+        elif reachable and desc:
             r.description = desc[:500]
         elif not reachable:
             r.email_note += "; website unreachable, general email"
