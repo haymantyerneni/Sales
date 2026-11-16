@@ -127,7 +127,10 @@ def cmd_setup(args):
 def cmd_run(args):
     """Start Harvey's heartbeat loop."""
     from harvey.main import main
+    from harvey.logfile import log_to_file_from_env, write_pid_file
 
+    log_to_file_from_env()
+    write_pid_file()
     main()
 
 

@@ -105,10 +105,12 @@ def _check_harvey_pid() -> int | None:
         return _harvey_process.pid
     if PID_FILE.exists():
         try:
+            from harvey.logfile import pid_alive
             pid = int(PID_FILE.read_text().strip())
-            os.kill(pid, 0)  # Check if process exists
-            return pid
-        except (ValueError, ProcessLookupError, PermissionError):
+            if pid_alive(pid):
+                return pid
+            PID_FILE.unlink(missing_ok=True)
+        except (ValueError, OSError):
             PID_FILE.unlink(missing_ok=True)
     return None
 
@@ -481,21 +483,22 @@ async def stop_harvey():
         return {"success": False, "message": "Harvey is not running."}
 
     try:
+        from harvey.logfile import pid_alive
         os.kill(pid, signal.SIGTERM)
-        # Wait briefly for graceful shutdown
+        # Wait briefly for graceful shutdown (pid_alive, never os.kill(pid, 0):
+        # on Windows signal 0 is Ctrl+C, not a probe).
         for _ in range(10):
-            try:
-                os.kill(pid, 0)
-                await asyncio.sleep(0.5)
-            except ProcessLookupError:
+            if not pid_alive(pid):
                 break
+            await asyncio.sleep(0.5)
         else:
-            # Force kill if still running
+            # Force kill if still running (SIGKILL doesn't exist on Windows,
+            # where SIGTERM already terminates outright).
             try:
-                os.kill(pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
+                os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+            except (ProcessLookupError, PermissionError, OSError):
                 pass
-    except (ProcessLookupError, PermissionError):
+    except (ProcessLookupError, PermissionError, OSError):
         pass
 
     _harvey_process = None
@@ -1344,4 +1347,9 @@ def start_dashboard(host: str = "127.0.0.1", port: int = 5555):
 
     print(f"\n  Harvey Dashboard running at http://{host}:{port}")
     print("  Press Ctrl+C to stop.\n")
-    uvicorn.run(app, host=host, port=port, log_level="warning")
+    from harvey.logfile import log_to_file_from_env
+    if log_to_file_from_env():
+        # Unattended: uvicorn's loggers propagate into the rotating file.
+        uvicorn.run(app, host=host, port=port, log_level="warning", log_config=None)
+    else:
+        uvicorn.run(app, host=host, port=port, log_level="warning")
