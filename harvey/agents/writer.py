@@ -26,7 +26,7 @@ from harvey.config import HarveyConfig
 from harvey.gate import BANNED_PHRASES, URL_RE
 from harvey.integrations.mail_provider import NATIVE_PROVIDERS
 from harvey.models.campaign import Campaign, EmailStep
-from harvey.models.prospect import BOOKKEEPING_PREFIXES, TARGETING_PREFIX  # noqa: F401
+from harvey.models.prospect import BOOKKEEPING_PREFIXES, TARGETING_PREFIX, is_trusted  # noqa: F401
 from harvey.signature import (add_opt_out, apply_signature, placeholders, strip_signature,
                               unwrap_paragraphs)
 from harvey.state import StateManager
@@ -377,7 +377,7 @@ class Writer:
         deliverable = {"verified", "risky"}
         prospects_with_email = [
             p for p in new_prospects
-            if p.email and (p.email_status or "guess") in deliverable
+            if p.email and ((p.email_status or "guess") in deliverable or is_trusted(p))
             and (p.source or "").strip().lower() != "test"
         ]
         if not prospects_with_email:

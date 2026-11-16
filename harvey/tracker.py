@@ -83,6 +83,13 @@ def source_label(source: str) -> str:
     return "Harvey lead gen"
 
 
+def email_status_label(status) -> str:
+    """trusted (your file) / verified / invalid; anything else (guessed,
+    catch-all, not checked) is unverified and is not emailed."""
+    s = (status or "").strip().lower()
+    return s if s in ("trusted", "verified", "invalid") else "unverified"
+
+
 def person_status(prospect: dict, items: list[dict]) -> str:
     """One status per person, most decisive first."""
     p_status = (prospect.get("status") or "").lower()
@@ -163,7 +170,7 @@ def build_row(prospect: dict, company: dict, items: list[dict], tz: str) -> list
         company.get("location") or "",
         segment["label"],
         prospect.get("email") or "",
-        prospect.get("email_status") or "",
+        email_status_label(prospect.get("email_status")),
         " | ".join(phones),
         status,
         _local(max(sent_at), tz, with_time=True) if sent_at else "",

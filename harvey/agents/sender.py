@@ -19,12 +19,43 @@ from datetime import date, datetime, timedelta, timezone
 from harvey.brain import Brain
 from harvey.config import HarveyConfig, EnvConfig
 from harvey.gate import html_part_problems, pre_send_check
+from harvey.models.prospect import email_sendable, is_trusted
 from harvey.integrations.instantly import InstantlyClient
 from harvey.integrations.mail_provider import NATIVE_PROVIDERS, get_mail_provider
 from harvey.signature import add_opt_out, apply_signature, html_alternative, placeholders
 from harvey.warmup import warmup_status
 
 IMPORT_SOURCE = "uploaded_list"   # harvey/importer.py
+
+# Trusted-address bookkeeping (settings table).
+TRUSTED_SENT_KEY = "trusted_sent"          # all-time sends to trusted addresses
+TRUSTED_BOUNCED_KEY = "trusted_bounced"    # all-time bounces among them
+
+
+def _trusted_day_key() -> str:
+    return "trusted_sent:" + datetime.now(timezone.utc).date().isoformat()
+
+
+async def trusted_remaining_today(state, config, warm) -> float:
+    """How many more trusted emails may go today. Unlimited (within the
+    daily cap) once the mailbox is fully warmed up."""
+    if warm.stage >= warm.stages - 1:
+        return float("inf")
+    imports = getattr(config, "imports", None)
+    limit = int(getattr(imports, "trusted_daily_max", 10))
+    sent = int(await state.get_setting(_trusted_day_key(), "0") or 0)
+    return max(0, limit - sent)
+
+
+async def record_trusted_send(state) -> None:
+    await state.increment_setting(_trusted_day_key())
+    await state.increment_setting(TRUSTED_SENT_KEY)
+
+
+async def trusted_stats(state) -> tuple[int, int]:
+    """(trusted emails sent, of which bounced)."""
+    return (int(await state.get_setting(TRUSTED_SENT_KEY, "0") or 0),
+            int(await state.get_setting(TRUSTED_BOUNCED_KEY, "0") or 0))
 from harvey.state import StateManager
 
 logger = logging.getLogger("harvey.sender")
@@ -406,7 +437,7 @@ class Sender:
                 continue
             if await self.state.is_suppressed(email):
                 continue
-            if (prospect.email_status or "guess") not in sendable_email:
+            if not email_sendable(prospect, allow_risky):
                 skipped += 1
                 continue
             seen_emails.add(email)
@@ -579,6 +610,7 @@ class Sender:
 
         allow_risky = getattr(self.config.channels.email, "send_to_risky", False)
         hold_cold = self._cold_hold_reason()
+        trusted_left = await trusted_remaining_today(self.state, self.config, warm)
         sent = 0
         for item in due:
             if sent >= budget:
@@ -620,6 +652,12 @@ class Sender:
                 item = await self._prepare_followup(item, prospect)
                 if item is None:
                     continue
+
+            # Trusted (uploaded, unverified) addresses go out in small daily
+            # batches during warm-up; the rest wait, still approved.
+            trusted = item["kind"] == "sequence" and is_trusted(prospect)
+            if trusted and trusted_left <= 0:
+                continue
 
             # Every email leaves signed; a body edited after staging is
             # re-signed (idempotent) so what's stored matches what's sent.
@@ -684,6 +722,9 @@ class Sender:
                 message_id=result.message_id, thread_ref=result.thread_ref,
                 from_email=warm.mailbox,
             )
+            if trusted:
+                trusted_left -= 1
+                await record_trusted_send(self.state)
             if prospect.status in ("new", "queued"):
                 await self.state.update_prospect_status(prospect.id, "contacted")
             if item["kind"] == "sequence" and int(item["step"]) == 1:

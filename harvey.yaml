@@ -98,3 +98,6 @@ tracker:
 # Your own uploaded lists (harvey import <file>)
 import:
   priority: true   # send imported prospects before Harvey's own leads
+  # Addresses from your file are "trusted": sent without a verifier.
+  trusted_daily_max: 10          # max trusted emails a day while warming up
+  trusted_max_bounce_rate: 0.05  # pause all sending past this trusted bounce rate

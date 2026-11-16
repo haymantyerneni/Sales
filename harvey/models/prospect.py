@@ -19,6 +19,29 @@ TARGETING_PREFIX = "Targeting:"
 IMPORT_PREFIX = "Import:"
 BOOKKEEPING_PREFIXES = (TARGETING_PREFIX, IMPORT_PREFIX)
 
+# The owner's own uploaded list (harvey/importer.py).
+UPLOAD_SOURCE = "uploaded_list"
+# Email status for addresses from the owner's uploaded file: sendable
+# without a verifier (the owner vouches for them), unlike "guess". Only ever
+# honoured for UPLOAD_SOURCE prospects; bounce safety is in the sender
+# (small daily batches) and handler (trusted bounce-rate kill switch).
+TRUSTED = "trusted"
+
+
+def is_trusted(prospect) -> bool:
+    return ((getattr(prospect, "email_status", "") or "") == TRUSTED
+            and (getattr(prospect, "source", "") or "") == UPLOAD_SOURCE)
+
+
+def email_sendable(prospect, allow_risky: bool = False) -> bool:
+    """The one rule for which addresses Harvey may email: verified (risky
+    catch-alls when allowed), or trusted from the owner's own list. Guessed
+    and unverified addresses from Harvey's own lead gen never are."""
+    status = (getattr(prospect, "email_status", "") or "guess")
+    if status == "verified" or (allow_risky and status == "risky"):
+        return True
+    return is_trusted(prospect)
+
 
 class Prospect(BaseModel):
     id: str = ""

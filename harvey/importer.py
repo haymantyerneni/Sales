@@ -28,11 +28,11 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from harvey.models.prospect import IMPORT_PREFIX
+from harvey.models.prospect import IMPORT_PREFIX, TRUSTED, UPLOAD_SOURCE
 
 logger = logging.getLogger("harvey.importer")
 
-IMPORT_SOURCE = "uploaded_list"
+IMPORT_SOURCE = UPLOAD_SOURCE
 from harvey.paths import PROJECT_ROOT  # noqa: E402
 
 IMPORT_DIR = PROJECT_ROOT / "data" / "imports"
@@ -564,11 +564,15 @@ async def plan_row(rec: dict, tools: SiteTools, env, smtp_ok: bool,
         r.decide()
         return r
 
-    r.email_status, r.email_note = await verify_given_email(email, env, smtp_ok)
-    if r.email_status == "invalid":
+    status, r.email_note = await verify_given_email(email, env, smtp_ok)
+    if status == "invalid":
+        r.email_status = "invalid"
         r.skip = f"invalid email: {r.email_note}"
         r.decide()
         return r
+    # Your own list: anything not proven bad is "trusted" (sendable without a
+    # verifier, in small daily batches with its own bounce switch).
+    r.email_status = "verified" if status == "verified" else TRUSTED
 
     company_domain = "" if is_free_mail(email_domain) else registrable(email_domain)
     if given:
@@ -670,7 +674,7 @@ async def _dup_row(rec: dict) -> PlanRow:
 
 def summarize(plan: list[PlanRow]) -> dict:
     s = {"rows": len(plan), "import": 0, "review": 0, "skip": 0,
-         "email": {"verified": 0, "risky": 0, "invalid": 0, "unverified": 0},
+         "email": {"verified": 0, "trusted": 0, "invalid": 0},
          "website": {"given": 0, "email domain": 0, "name search": 0, "not found": 0},
          "skipped": {}}
     for r in plan:
@@ -842,7 +846,7 @@ async def commit(path: str | Path, state, config, env) -> dict:
         company_id = await state.add_company(company)
         prospect = Prospect(
             company_id=company_id, first_name=r.first_name, last_name=r.last_name,
-            email=r.email, email_status="guess" if r.email_status == "unverified" else r.email_status,
+            email=r.email, email_status=r.email_status if r.email_status == "verified" else TRUSTED,
             email_verified=r.email_status == "verified", phone=r.phone, title=r.title,
             source=IMPORT_SOURCE, source_url=f"{source.name}#row{r.row}", status="new",
             personalization_notes=_bookkeeping(r, source.name), company=r.company,
@@ -868,13 +872,11 @@ def format_summary(result: dict) -> str:
         f"  Skipped:              {s['skip']}" + (
             "  (" + ", ".join(f"{k}: {v}" for k, v in s["skipped"].items()) + ")"
             if s["skipped"] else ""),
-        f"  Emails:               verified {e['verified']}, risky {e['risky']}, "
-        f"invalid {e['invalid']}, unverified {e['unverified']}",
+        f"  Emails:               trusted {e['trusted']} (from your file), verified "
+        f"{e['verified']}, invalid {e['invalid']} (skipped)",
         f"  Websites:             from email domain {w['email domain']}, name search "
         f"{w['name search']}, given {w['given']}, not found {w['not found']}",
     ]
-    if not result.get("smtp_ok"):
-        out.append("  (Port 25 is blocked here, so only verifier keys can confirm emails.)")
     flagged = [r for r in plan if r.action == "review"]
     if flagged:
         out.append("\n  Flagged for review:")

@@ -66,9 +66,11 @@ def pre_send_check(
     if prospect is not None:
         if (prospect.email or "").strip().lower() != to_email:
             reasons.append("recipient does not match the prospect record")
-        allowed = DELIVERABLE_STATUSES if allow_risky else {"verified"}
+        from harvey.models.prospect import email_sendable
         # Replies go back to someone who emailed US — deliverability proven.
-        if kind == "sequence" and (prospect.email_status or "guess") not in allowed:
+        # Otherwise: verified (risky when allowed), or trusted from the
+        # owner's own uploaded list.
+        if kind == "sequence" and not email_sendable(prospect, allow_risky):
             reasons.append(
                 f"email_status '{prospect.email_status or 'guess'}' is not deliverable"
             )

@@ -322,6 +322,11 @@ class ImportConfig(BaseModel):
     # Imported prospects go before Harvey's own leads when the daily cap is
     # tight. Both share the one cap.
     priority: bool = True
+    # Addresses from your file are "trusted" (sent without a verifier). While
+    # the mailbox is warming up, at most this many trusted emails a day.
+    trusted_daily_max: int = 10
+    # Pause ALL sending once bounces among trusted emails pass this rate.
+    trusted_max_bounce_rate: float = 0.05
 
 
 class HarveyConfig(BaseModel):

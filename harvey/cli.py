@@ -214,6 +214,17 @@ def cmd_status(args):
                 if warm.held:
                     print(f"  ⚠ Warm-up HOLDING:    {warm.held}. It steps up again once "
                           "the bounce rate is back under the limit.")
+                from harvey.agents.sender import trusted_remaining_today, trusted_stats
+                t_sent, t_bounced = await trusted_stats(state)
+                left = await trusted_remaining_today(state, cfg, warm)
+                limit = cfg.imports.trusted_daily_max
+                batch = ("no extra limit (warmed up)" if left == float("inf")
+                         else f"{limit - int(left)}/{limit} sent today (warm-up batch)")
+                print(f"  Uploaded list:        {batch}; bounces {t_bounced}/{t_sent}, "
+                      f"pauses above {cfg.imports.trusted_max_bounce_rate:.0%}")
+            paused = await state.get_setting("sending_paused")
+            if paused:
+                print(f"  ⚠ SENDING PAUSED:     {paused}")
         except Exception as e:
             print(f"  Send cap:             unavailable ({e})")
         from harvey.brain import BRAIN_STATUS_KEY, Brain, active_brain_status

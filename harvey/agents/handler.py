@@ -15,6 +15,7 @@ from harvey.config import HarveyConfig, EnvConfig
 from harvey.integrations.instantly import InstantlyClient
 from harvey.integrations.mail_provider import NATIVE_PROVIDERS, get_mail_provider
 from harvey.models.conversation import Conversation, Message
+from harvey.models.prospect import is_trusted
 from harvey.signature import apply_signature
 from harvey.state import StateManager
 
@@ -448,6 +449,7 @@ class Handler:
         if outbox_item:
             # Per-mailbox bounce rate for the warm-up ramp (harvey/warmup.py).
             await self.state.update_outbox_item(outbox_item["id"], error="bounced")
+        was_trusted = bool(prospect) and is_trusted(prospect)
         if prospect:
             await self.state.update_prospect_email(
                 prospect.id, prospect.email, "invalid"
@@ -486,6 +488,25 @@ class Handler:
             )
             await self.state.set_setting(KILL_SWITCH_KEY, reason)
             logger.error(f"Handler: KILL SWITCH ENGAGED — {reason}")
+
+        if was_trusted:
+            await self._check_trusted_bounce_rate()
+
+    async def _check_trusted_bounce_rate(self):
+        """Trusted addresses (your uploaded list, never verified) have their
+        own, stricter switch: past the limit, ALL sending pauses. No minimum
+        sample: early on, one bounce is enough."""
+        from harvey.agents.sender import TRUSTED_BOUNCED_KEY, trusted_stats
+        await self.state.increment_setting(TRUSTED_BOUNCED_KEY)
+        sent, bounced = await trusted_stats(self.state)
+        imports = getattr(self.config, "imports", None)
+        limit = float(getattr(imports, "trusted_max_bounce_rate", 0.05))
+        if limit > 0 and bounced / max(sent, 1) > limit:
+            reason = (f"uploaded-list bounce rate {bounced}/{sent} "
+                      f"({bounced / max(sent, 1):.0%}) passed {limit:.0%}: check the list, "
+                      "then resume with harvey sending resume")
+            await self.state.set_setting(KILL_SWITCH_KEY, reason)
+            logger.error(f"Handler: SENDING PAUSED — {reason}")
 
     async def _queue_native_reply(
         self, response: str, prospect, convo, reply_meta: dict, intent: str

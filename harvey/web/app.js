@@ -1297,8 +1297,8 @@ async function importPreview(input) {
   panel.innerHTML = '<div class="card" style="margin-bottom:16px">' +
     '<h2>Import check: ' + escHtml(file.name) + '</h2>' +
     '<p style="font-size:13px;color:var(--text-2)">' + s.rows + ' rows: ' + s.import +
-    ' ready, ' + s.review + ' need review, ' + s.skip + ' skipped. Emails: verified ' +
-    e.verified + ', risky ' + e.risky + ', invalid ' + e.invalid + ', unverified ' + e.unverified +
+    ' ready, ' + s.review + ' need review, ' + s.skip + ' skipped. Emails: trusted ' +
+    e.trusted + ', verified ' + e.verified + ', invalid ' + e.invalid + ' (skipped)' +
     '. Websites: email domain ' + w['email domain'] + ', name search ' + w['name search'] +
     ', given ' + w.given + ', not found ' + w['not found'] + '.</p>' +
     '<p style="font-size:13px;color:var(--text-2)">To correct names or websites, edit the review sheet ' +
