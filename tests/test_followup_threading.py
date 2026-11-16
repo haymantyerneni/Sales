@@ -333,9 +333,26 @@ Warm regards,"""
 
 REFERENCE_FU1 = """Hi {{first_name}},
 
-An easy first step for {{company}} is moving one workload off AWS to compare cost.
+An easy first step for {{company}} is a cost comparison for one workload on our servers.
 
-Open to a 15-minute call on Thursday or Friday?
+Open to a 15-minute call this week or next?
+
+Warm regards,"""
+
+# The brief's own FU1 for Saras India (continues email 1's Microsoft angle).
+SARAS_FU1 = """Hi Haymant,
+
+If it's useful, we could start with a quick review of Saras India's Microsoft licensing or the servers behind your on-premises SharePoint work.
+
+Would a 15-minute call this week or next suit you?
+
+Warm regards,"""
+
+SARAS_FU2 = """Hi Haymant,
+
+Last note. If Microsoft licensing comes up at Saras India, just reply here.
+
+May I check back in a few months?
 
 Warm regards,"""
 
@@ -430,11 +447,32 @@ def test_style_checks_catch_violations():
     assert any("under 70 words" in p for p in check(long))
     assert any("lists" in p for p in check(ref.replace("That's what", "- That's what")))
     assert any("filler" in p for p in followup_problems(REFERENCE_FU1.replace("An easy", "Hope your week is going well. An easy"), 2))
-    assert any("repeat the services" in p for p in followup_problems(REFERENCE_FU1.replace("to compare cost", "from ₹999/month"), 2))
-    assert any("rupee" in p for p in followup_problems(REFERENCE_FU1.replace("to compare cost", "billed in rupees"), 2))
+    assert any("repeat the services" in p for p in followup_problems(REFERENCE_FU1.replace("on our servers", "from ₹999/month"), 2))
+    assert any("rupee" in p for p in followup_problems(REFERENCE_FU1.replace("on our servers", "billed in rupees"), 2))
     assert any("under 25" in p for p in followup_problems(REFERENCE_FU2.replace("later,", "later, or backups, or IT support, or migration,"), 3))
     two_q = REFERENCE_FU2.replace("Last note from me.", "Last note from me. Busy week?")
     assert any("one question" in p for p in followup_problems(two_q, 3))
+
+
+def test_follow_ups_never_name_weekdays_or_assume_tools():
+    from harvey.agents.writer import assumed_tools, first_email_problems, followup_problems
+    facts = "- Research notes: " + SARAS["detail"]
+    assert followup_problems(SARAS_FU1, 2, "Haymant", facts) == []
+    assert followup_problems(SARAS_FU2, 3, "Haymant", facts) == []
+    thu = SARAS_FU1.replace("this week or next", "on Thursday")
+    assert any("weekday" in p for p in followup_problems(thu, 2, "Haymant", facts))
+    aws = SARAS_FU1.replace("a quick review of Saras India's Microsoft licensing",
+                            "moving a workload off AWS")
+    assert any("assumes they use ['AWS']" in p for p in followup_problems(aws, 2, "Haymant", facts))
+    azure = SARAS_FU1.replace("a quick review of", "moving off Azure and")
+    assert any("Azure" in p for p in followup_problems(azure, 2, "Haymant", facts))
+    # Named in the facts, so it may be mentioned.
+    assert assumed_tools("moving off AWS", "- Research notes: runs its platform on AWS") == []
+    assert assumed_tools("Google Cloud and Azure", "") == ["Azure", "Google Cloud"]
+    assert any("weekday" in p for p in first_email_problems(
+        REFERENCE_EMAIL_1.replace("this week", "on Monday"), "Haymant", saras_services()))
+    # A personal follow-up must greet the person by name, not a merge tag.
+    assert any("Hi Haymant," in p for p in followup_problems(REFERENCE_FU1, 2, "Haymant", facts))
 
 
 def test_paragraphs_are_one_line_each():
@@ -474,12 +512,14 @@ async def test_personal_email_is_regenerated_until_it_follows_the_rules(state):
         async def think_json(self, prompt, **kw):
             self.calls.append(prompt)
             if len(self.calls) == 1:
-                return {"subject": "Cloud hosting & IT support for Acme Tech",
-                        "body": "Hi Ravi,\n\nGet a free migration now!"}
-            return {"subject": "Cloud hosting & IT support for Acme Tech",
-                    "body": REFERENCE_EMAIL_1}
+                return {"subject": "Microsoft licensing & hosting for Saras India",
+                        "body": REFERENCE_EMAIL_1,
+                        "followup_1": SARAS_FU1.replace("this week or next", "on Thursday or Friday"),
+                        "followup_2": SARAS_FU2}
+            return {"subject": "Microsoft licensing & hosting for Saras India",
+                    "body": REFERENCE_EMAIL_1, "followup_1": SARAS_FU1, "followup_2": SARAS_FU2}
 
-    cfg = make_config(window=("09:30", "12:00"))
+    cfg = make_config()
     brain = Brain()
     writer = Writer(brain=brain, state=state, config=cfg)
     prospect = Prospect(first_name="Haymant", last_name="Y", title="Founder",
@@ -488,5 +528,44 @@ async def test_personal_email_is_regenerated_until_it_follows_the_rules(state):
                         email="haymant@sarasindia.com")
     draft = await writer._write_personal_email(prospect)
     assert draft["body"] == REFERENCE_EMAIL_1
+    assert draft["followup_1"] == SARAS_FU1.replace("\n\nWarm regards,", "\n\nWarm regards,")
     assert len(brain.calls) == 2
-    assert "broke these rules" in brain.calls[1]
+    assert "broke these rules" in brain.calls[1] and "weekday" in brain.calls[1]
+    assert "Microsoft licensing" in brain.calls[0] and "this week or next" in brain.calls[0]
+
+    # Staged: email 1 and both personal follow-ups, signed, follow-ups as Re:.
+    from harvey.models.campaign import Campaign
+    pid = await state.add_prospect(prospect)
+    cid = await state.add_campaign(Campaign(id="", name="t", channel="email", sequence=[],
+                                            prospect_ids=[pid], status="draft"))
+    prospect.id = pid
+    brain.calls.clear()
+    await writer._personalize_first_emails(cid, [prospect])
+    staged = await state.get_sequence_rows(cid, pid)
+    assert [r["step"] for r in staged] == [1, 2, 3]
+    assert staged[1]["subject"] == "Re: Microsoft licensing & hosting for Saras India"
+    assert all(r["body"].endswith("Warm regards,\n" + SIG) for r in staged)
+    assert "Microsoft licensing or the servers" in staged[1]["body"]
+
+
+@pytest.mark.asyncio
+async def test_followup_is_sent_signed_in_both_parts(state):
+    """FU1 leaves with the signature in the plain part and, with a logo
+    configured, in the HTML part too."""
+    pid, campaign = await seed(state)
+    provider = FakeProvider()
+    sender = make_sender(state, provider)
+    sender.config.persona.logo_url = "https://cdn.example.com/logo.png"
+    await sender._run_native()
+    rows_ = await rows(state, campaign, pid)
+    await state.update_outbox_item(rows_[1]["id"], status="approved")
+    await sender._run_native()
+    rows_ = await rows(state, campaign, pid)
+    await state.update_outbox_item(rows_[2]["id"], status="approved")
+    await make_due(state, rows_[2]["id"])
+    await sender._run_native()
+    fu1 = provider.sent[-1]
+    assert fu1["subject"].startswith("Re: ")
+    assert fu1["body"].endswith("Warm regards,\n" + SIG)
+    assert "+91 90000 00000 | cloudbox99.com" in fu1["html"]
+    assert fu1["html"].index("Haymant Yerneni") < fu1["html"].index("<img")

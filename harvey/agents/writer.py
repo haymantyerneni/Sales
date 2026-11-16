@@ -19,7 +19,7 @@ deterministic pre-send gate.
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from harvey.brain import Brain
 from harvey.config import HarveyConfig
@@ -102,7 +102,7 @@ SEGMENTS = (
                      "startup", "cloud", "it company", "infotech", "systems"),
         "lead": ("vps", "migration"),
         "angle": "VPS and dedicated servers, often moving off AWS/Azure to cut cost",
-        "start": "moving one workload off AWS or Azure to compare cost",
+        "start": "a cost comparison for one workload on our VPS or dedicated servers",
     },
 )
 DEFAULT_SEGMENT = {
@@ -192,6 +192,43 @@ FILLER_RE = re.compile(
 # Never mention rupee billing (the ₹999/month price is the only rupee figure).
 RUPEE_BILLING_RE = re.compile(r"\brupees?\b|\binr\b|\bbill(ed|ing)\s+in\b", re.IGNORECASE)
 
+# Never assume what a prospect runs on: a provider or platform may be named
+# only when the facts we hold about them name it.
+ASSUMED_TOOLS = {
+    "AWS": r"\baws\b|amazon web services",
+    "Azure": r"\bazure\b",
+    "Google Cloud": r"google cloud|\bgcp\b",
+    "DigitalOcean": r"digital ?ocean",
+    "Hostinger": r"\bhostinger\b",
+    "GoDaddy": r"\bgodaddy\b",
+    "Linode": r"\blinode\b|\bakamai\b",
+    "Oracle Cloud": r"oracle cloud|\boci\b",
+    "E2E Networks": r"\be2e\b",
+    "Google Workspace": r"google workspace|\bg ?suite\b",
+}
+WEEKDAY_RE = re.compile(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?\b",
+                        re.IGNORECASE)
+
+
+def assumed_tools(text: str, facts: str) -> list[str]:
+    """Providers/platforms named in `text` that the facts never mention."""
+    return [name for name, pat in ASSUMED_TOOLS.items()
+            if re.search(pat, text or "", re.IGNORECASE)
+            and not re.search(pat, facts or "", re.IGNORECASE)]
+
+
+def _grounding_problems(core: str, facts: str) -> list[str]:
+    problems = []
+    day = WEEKDAY_RE.search(core)
+    if day:
+        problems.append(f'names a weekday ("{day.group(0)}"); say "this week or next"')
+    unknown = assumed_tools(core, facts)
+    if unknown:
+        problems.append(f"assumes they use {unknown}, which the facts never say; "
+                        "never assume what a prospect runs on")
+    return problems
+
+
 # Email 1's bridge into the services sentence ("That's what we do at
 # CloudBox99 in Hyderabad: ..."). Straight or curly apostrophe.
 BRIDGE = "That's what we do at CloudBox99 in Hyderabad:"
@@ -201,10 +238,10 @@ BRIDGE_RE = re.compile(r"That['’]s what we do at CloudBox99 in Hyderabad:\s*(.
 
 
 def first_email_problems(body: str, first_name: str, services: list[str],
-                         sender_first: str = "Haymant") -> list[str]:
+                         sender_first: str = "Haymant", facts: str = "") -> list[str]:
     """Everything wrong with an email 1 draft ([] = it may be queued)."""
     core = strip_signature(body)
-    problems = _common_problems(core)
+    problems = _common_problems(core) + _grounding_problems(core, facts)
     if first_name and not core.startswith(f"Hi {first_name},"):
         problems.append(f'must open with "Hi {first_name}," on its own line')
     filler = FILLER_RE.search(core)
@@ -236,12 +273,14 @@ def first_email_problems(body: str, first_name: str, services: list[str],
     return problems
 
 
-def followup_problems(body: str, step: int) -> list[str]:
-    """Everything wrong with a follow-up template ([] = acceptable)."""
+def followup_problems(body: str, step: int, first_name: str = "{{first_name}}",
+                      facts: str = "") -> list[str]:
+    """Everything wrong with a follow-up ([] = acceptable). `first_name` is
+    the real name for a personal draft, the merge tag for a template."""
     core = strip_signature(body)
-    problems = _common_problems(core)
-    if not core.startswith("Hi {{first_name}},"):
-        problems.append('must open with "Hi {{first_name}}," on its own line')
+    problems = _common_problems(core) + _grounding_problems(core, facts)
+    if first_name and not core.startswith(f"Hi {first_name},"):
+        problems.append(f'must open with "Hi {first_name}," on its own line')
     filler = FILLER_RE.search(core)
     if filler:
         problems.append(f'contains filler ("{filler.group(0)}"); be direct')
@@ -359,11 +398,12 @@ class Writer:
         return campaign_id
 
     async def _personalize_first_emails(self, campaign_id: str, prospects: list):
-        """Draft a grounded, per-prospect email 1 and stage it in the outbox.
+        """Draft a grounded, per-prospect sequence (email 1 + both follow-ups,
+        one angle, one set of facts) and stage it in the outbox.
 
         The outbox unique index means the sender's later template staging
-        can't overwrite these rows — a personalized draft always wins the
-        (campaign, prospect, step 1) slot. If a draft fails, the slot stays
+        can't overwrite these rows: a personalized draft always wins its
+        (campaign, prospect, step) slot. If a draft fails, the slots stay
         empty and the sender falls back to the campaign template.
         """
         require_approval = getattr(
@@ -395,6 +435,24 @@ class Writer:
             )
             if item_id:
                 drafted += 1
+            # Follow-ups: sent as replies in email 1's thread; the sender
+            # reschedules them from email 1's real send time (day 4, day 10).
+            offset = 0
+            for step, key in ((2, "followup_1"), (3, "followup_2")):
+                offset += SEQUENCE_DELAYS[step - 1]
+                if not draft.get(key):
+                    continue
+                await self.state.add_outbox_item(
+                    prospect_id=prospect.id,
+                    campaign_id=campaign_id,
+                    step=step,
+                    to_email=prospect.email,
+                    subject=re_subject(draft["subject"]),
+                    body=apply_signature(draft[key], self.config.persona),
+                    send_at=(datetime.fromisoformat(now) + timedelta(days=offset)).isoformat(),
+                    status=status,
+                    provider=provider,
+                )
 
         if drafted:
             logger.info(
@@ -440,7 +498,9 @@ class Writer:
         )
 
     async def _write_personal_email(self, prospect) -> dict | None:
-        """One grounded draft for one person. Facts in, one email out."""
+        """One grounded sequence for one person: email 1 plus both
+        follow-ups, written together so they share one angle and one set of
+        facts. Facts in, three emails out."""
         facts = [
             f"- Name: {prospect.full_name()}",
             f"- Title: {prospect.title}",
@@ -482,10 +542,19 @@ class Writer:
             prospect.industry, description, notes,
             getattr(company, "industry", "") if company else ""))
         first = prospect.first_name or ""
+        microsoft = services[0] == SERVICES["microsoft"]
+        lead = services[0]
+        fu1_start = (
+            f"a quick review of {prospect.company}'s Microsoft licensing, or servers for "
+            "the on-premises work the FACTS mention (only if they mention it)"
+            if microsoft else segment["start"]
+        )
+        facts_blob = "\n".join(facts)
 
         task = f"""
 
-TASK: write EMAIL 1 (the very first touch) to this specific person.
+TASK: write the 3-email sequence to this specific person: EMAIL 1 (first
+touch) and its two follow-ups, which go as replies in the same thread.
 
 FACTS — everything you know about them. Every claim about the prospect must
 come from these facts. If a fact isn't listed, you don't know it:
@@ -529,7 +598,31 @@ Subject: 3-8 words naming {prospect.company} and the service that leads
 comes first, "Hosting and IT for Acme Tech" otherwise).
 No "Re:", no "quick question". Write the actual text (no merge variables).
 
-Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
+FOLLOW-UP 1 (day 4, under {FOLLOWUP_MAX_WORDS[2]} words):
+- "Hi {first or '{{first_name}}'}," then ONE sentence offering one concrete,
+  easy starting point that continues EMAIL 1's angle ({lead} first), e.g.
+  {fu1_start}. Then one short question asking for a 15-minute call
+  "this week or next".
+- Same angle and the same facts as EMAIL 1. Never assume what they use (AWS,
+  Azure, Google Cloud, any provider or tool) unless the FACTS say so.
+- No filler, do not repeat the services sentence, never mention rupees.
+Reference FU1 (style only), for a Microsoft-focused firm:
+Hi Haymant,
+
+If it's useful, we could start with a quick review of Saras India's Microsoft licensing or the servers behind your on-premises SharePoint work.
+
+Would a 15-minute call this week or next suit you?
+
+FOLLOW-UP 2 (day 10, under {FOLLOWUP_MAX_WORDS[3]} words):
+- "Hi {first or '{{first_name}}'}," then: last note from you; if {lead.split(' from ')[0].lower()}
+  or the like comes up at {prospect.company} later, they can reply here. One
+  short question asking whether you may check back in a few months.
+
+All three: never name a weekday (say "this week or next"), each paragraph
+one line, last line "Warm regards," with nothing after it, exactly one "?".
+
+Return ONLY JSON:
+{{"subject": "...", "body": "...", "followup_1": "...", "followup_2": "..."}}"""
 
         prompt = self._base_prompt() + task
         problems: list[str] = []
@@ -540,7 +633,9 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
                 ask += (
                     "\n\nYour previous draft broke these rules:\n"
                     + "\n".join(f"- {p}" for p in problems)
-                    + f"\n\nPrevious draft:\n{draft['body']}\n\nRewrite it so every rule holds."
+                    + f"\n\nPrevious draft:\nEMAIL 1:\n{draft['body']}\n\nFOLLOW-UP 1:\n"
+                    f"{draft['followup_1']}\n\nFOLLOW-UP 2:\n{draft['followup_2']}\n\n"
+                    "Rewrite all three so every rule holds."
                 )
             result = await self.brain.think_json(
                 ask, session_id="harvey-writer",
@@ -549,18 +644,27 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
             if not isinstance(result, dict):
                 continue
             subject = str(result.get("subject") or "").strip()
-            body = str(result.get("body") or "").strip()
+            body = unwrap_paragraphs(str(result.get("body") or ""))
+            fu1 = unwrap_paragraphs(str(result.get("followup_1") or ""))
+            fu2 = unwrap_paragraphs(str(result.get("followup_2") or ""))
             if not subject or not body:
                 continue
-            body = unwrap_paragraphs(body)
-            draft = {"subject": subject[:120], "body": body[:3000]}
-            problems = first_email_problems(body, first, services, self.sender_first_name)
+            draft = {"subject": subject[:120], "body": body[:3000],
+                     "followup_1": fu1[:2000], "followup_2": fu2[:2000]}
+            problems = first_email_problems(body, first, services, self.sender_first_name,
+                                            facts=facts_blob)
             problems += [f"subject: {p}" for p in _subject_problems(subject)]
+            for step, text in ((2, fu1), (3, fu2)):
+                if not text:
+                    problems.append(f"follow-up {step - 1} is missing")
+                    continue
+                problems += [f"follow-up {step - 1}: {p}" for p in followup_problems(
+                    text, step, first_name=first or "{{first_name}}", facts=facts_blob)]
             if not problems:
                 return draft
             logger.info(f"Writer: email 1 draft for {prospect.email} attempt "
                         f"{attempt + 1} needs fixing: {problems}")
-        logger.warning(f"Writer: no acceptable email 1 for {prospect.email} after "
+        logger.warning(f"Writer: no acceptable sequence for {prospect.email} after "
                        f"{MAX_ATTEMPTS} attempts: {problems}")
         return None
 
@@ -594,7 +698,9 @@ EMAIL 1 (day 0), a fallback used only when a personal draft is unavailable:
 
 FOLLOW-UP 1 (day 4, sent as a reply in the same thread):
 - "Hi {{{{first_name}}}}," then, directly: one easy starting point for this
-  segment ({segment['start']}), and one short question asking for a 15-minute call.
+  segment ({segment['start']}), and one short question asking for a 15-minute
+  call "this week or next". Never name a weekday. Never assume what they use
+  (AWS, Azure or any provider).
 - No filler, no "hope your week", do not repeat the services, never mention rupees or billing.
 - Under {FOLLOWUP_MAX_WORDS[2]} words before the sign-off. Last line "Warm regards,".
 
@@ -710,6 +816,11 @@ Return ONLY a JSON array (no markdown fences, no commentary):
         # per prospect (one Claude call each); leftovers ride the next cycle.
         cap = NATIVE_BATCH_CAP if self.is_native else LEGACY_BATCH_CAP
         return {key: group[:cap] for key, group in batches.items()}
+
+
+def re_subject(subject: str) -> str:
+    subject = (subject or "").strip()
+    return subject if subject.lower().startswith("re:") else f"Re: {subject}"
 
 
 def _subject_problems(subject: str) -> list[str]:

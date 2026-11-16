@@ -68,26 +68,28 @@ Warm regards,
 
 ### Follow-up 1 (day 4, same thread): under 40 words
 
-One easy starting point for their segment (moving one workload off AWS to compare cost, one backup setup covering every site) and one short question asking for a 15-minute call. Never repeat the services.
+Continue Email 1's angle with the same facts: offer ONE concrete, easy starting point tied to the service that led Email 1, then one short question asking for a 15-minute call "this week or next". Never repeat the services. Never assume what they use (AWS, Azure, any provider or tool) unless the research notes say so. Never name a weekday.
+
+For a Microsoft-focused company, offer a Microsoft licensing review or servers for their on-premises work, never "moving off Azure".
 
 ```
-Hi Ravi,
+Hi Haymant,
 
-An easy first step for Acme Tech is moving one workload off AWS to compare cost.
+If it's useful, we could start with a quick review of Saras India's Microsoft licensing or the servers behind your on-premises SharePoint work.
 
-Open to a 15-minute call on Thursday or Friday?
+Would a 15-minute call this week or next suit you?
 
 Warm regards,
 ```
 
 ### Follow-up 2 (day 10, same thread): under 25 words
 
-Last note; they can reply any time; ask once whether you may check back in a few months.
+Last note, on the same angle; they can reply any time; ask once whether you may check back in a few months.
 
 ```
-Hi Ravi,
+Hi Haymant,
 
-Last note from me. If hosting comes up at Acme Tech later, just reply here.
+Last note. If Microsoft licensing comes up at Saras India, just reply here.
 
 May I check back in a few months?
 
@@ -116,7 +118,7 @@ Each prospect gets its own wording. Keep the structure, change the sentences. Ne
 
 Before finalizing any email, ask:
 
-1. Is it crisp and direct, with no filler?
+1. Is it crisp and direct, with no filler, no weekday names, and no assumptions about what they use?
 2. Is there exactly one question?
 3. Is it within its word limit (email 1: under 70; follow-up 1: under 40; follow-up 2: under 25)?
 4. Does email 1 bridge from the detail to "That's what we do at CloudBox99 in Hyderabad:" with all five services in the right order, no self-introduction, no rupee billing, and no links?
