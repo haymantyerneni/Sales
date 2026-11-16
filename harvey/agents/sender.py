@@ -22,6 +22,7 @@ from harvey.gate import html_part_problems, pre_send_check
 from harvey.integrations.instantly import InstantlyClient
 from harvey.integrations.mail_provider import NATIVE_PROVIDERS, get_mail_provider
 from harvey.signature import apply_signature, html_alternative, placeholders
+from harvey.warmup import warmup_status
 from harvey.state import StateManager
 
 logger = logging.getLogger("harvey.sender")
@@ -546,11 +547,13 @@ class Sender:
             )
             return
 
-        max_daily = self.config.channels.email.max_daily_sends
-        sent_today = await self.state.count_outbox_sent_today()
-        budget = min(MAX_SENDS_PER_CYCLE, max_daily - sent_today)
+        warm = await warmup_status(self.state, self.config)
+        if warm.held:
+            logger.warning(f"Sender: warm-up {warm.held}")
+        budget = min(MAX_SENDS_PER_CYCLE, warm.remaining)
         if budget <= 0:
-            logger.info(f"Sender: daily send cap reached ({sent_today}/{max_daily}).")
+            logger.info(f"Sender: daily send cap reached ({warm.sent_today}/{warm.cap}, "
+                        f"{warm.mailbox}).")
             return
 
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
@@ -665,6 +668,7 @@ class Sender:
             await self.state.update_outbox_item(
                 item["id"], status="sent", sent_at=now_iso,
                 message_id=result.message_id, thread_ref=result.thread_ref,
+                from_email=warm.mailbox,
             )
             if prospect.status in ("new", "queued"):
                 await self.state.update_prospect_status(prospect.id, "contacted")
@@ -704,4 +708,4 @@ class Sender:
 
         if sent:
             logger.info(f"Sender: {sent} email(s) sent this cycle "
-                        f"({sent_today + sent}/{max_daily} today).")
+                        f"({warm.sent_today + sent}/{warm.cap} today, {warm.mailbox}).")

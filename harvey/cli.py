@@ -199,6 +199,20 @@ def cmd_status(args):
         by_provider = summary.get("usage_today_by_provider", {})
         print(f"  Claude calls today:   {by_provider.get('claude', summary['usage_today'])}")
         print(f"  Codex calls today:    {by_provider.get('codex', 0)}")
+        try:
+            from harvey.config import load_config
+            from harvey.warmup import warmup_status
+            cfg = load_config()
+            if cfg.channels.email.provider in ("gmail", "smtp"):
+                warm = await warmup_status(state, cfg)
+                print(f"  Send cap:             {warm.describe()}")
+                print(f"                        mailbox {warm.mailbox}, bounce rate "
+                      f"{warm.bounce_rate:.1%} ({warm.bounced_total}/{warm.sent_total})")
+                if warm.held:
+                    print(f"  ⚠ Warm-up HOLDING:    {warm.held}. It steps up again once "
+                          "the bounce rate is back under the limit.")
+        except Exception as e:
+            print(f"  Send cap:             unavailable ({e})")
         from harvey.brain import BRAIN_STATUS_KEY, Brain, active_brain_status
         from harvey.config import ConfigError, load_brain_config
         try:

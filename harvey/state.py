@@ -413,6 +413,11 @@ MIGRATIONS: list[str] = [
     -- so one subscription's budget never consumes the other's.
     ALTER TABLE usage_log ADD COLUMN codex_calls INTEGER DEFAULT 0;
     """,
+    # ── v12: which mailbox sent each email (per-mailbox cap + warm-up) ──
+    """
+    ALTER TABLE outbox ADD COLUMN from_email TEXT DEFAULT '';
+    CREATE INDEX IF NOT EXISTS idx_outbox_from_sent ON outbox(from_email, status, sent_at);
+    """,
 ]
 
 BRAIN_PROVIDERS = ("claude", "codex")
@@ -882,7 +887,7 @@ class StateManager:
 
     _OUTBOX_COLUMNS = frozenset({
         "status", "error", "message_id", "thread_ref", "sent_at",
-        "subject", "body", "send_at", "provider", "in_reply_to",
+        "subject", "body", "send_at", "provider", "in_reply_to", "from_email",
     })
 
     async def update_outbox_item(self, item_id: str, **kwargs):

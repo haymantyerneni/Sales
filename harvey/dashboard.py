@@ -695,8 +695,18 @@ async def get_outbox_api():
     try:
         state = _state()
         await state.init_db()
+        warm = None
+        try:
+            from harvey.config import load_config
+            from harvey.warmup import warmup_status
+            cfg = load_config()
+            if cfg.channels.email.provider in ("gmail", "smtp"):
+                warm = (await warmup_status(state, cfg)).as_dict()
+        except Exception as e:
+            warm = {"error": str(e)}
         return {
             "paused": await state.get_setting("sending_paused"),
+            "send_cap": warm,
             "pending": await state.get_outbox(status="pending_review", limit=100),
             "approved": await state.get_outbox(status="approved", limit=50),
             "sent": (await query_db(

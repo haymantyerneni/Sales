@@ -97,12 +97,44 @@ class ICPConfig(BaseModel):
     country: str = ""
 
 
+class WarmupConfig(BaseModel):
+    """Daily cap ramp for a new mailbox, from its first send date (see
+    harvey/warmup.py). Every send counts: Email 1, follow-ups, replies."""
+    enabled: bool = True
+    ramp: list[int] = [10, 20, 30, 50]   # per day: week 1, 2, 3, 4+
+    step_days: int = 7
+    # Step up only while the mailbox's bounce rate is under this; else hold.
+    max_bounce_rate: float = 0.03
+    # Hard cap for specific mailboxes, e.g. a test inbox: {"me@gmail.com": 5}
+    mailbox_caps: dict[str, int] = {}
+
+    @field_validator("ramp")
+    @classmethod
+    def _ramp_positive(cls, v: list[int]) -> list[int]:
+        if any(x <= 0 for x in v):
+            raise ValueError("warmup.ramp steps must be > 0")
+        return v
+
+    @field_validator("mailbox_caps")
+    @classmethod
+    def _lower_caps(cls, v: dict[str, int]) -> dict[str, int]:
+        out = {}
+        for k, n in (v or {}).items():
+            if int(n) < 0:
+                raise ValueError("warmup.mailbox_caps values must be >= 0")
+            out[k.strip().lower()] = int(n)
+        return out
+
+
 class EmailChannelConfig(BaseModel):
     enabled: bool = True
     # "instantly" (legacy), "gmail" (Gmail/Workspace via API — recommended),
     # or "smtp" (any SMTP+IMAP mailbox: AgentMail, Fastmail, ...)
     provider: str = "instantly"
+    # Per mailbox, all sends counted. With gmail/smtp this is the ceiling the
+    # warm-up ramp climbs to; the cap enforced today comes from `warmup`.
     max_daily_sends: int = 50
+    warmup: WarmupConfig = WarmupConfig()
     # When True, also send to catch-all ("risky") domains, not just verified
     # mailboxes. Off by default — catch-alls accept everything, so a bad
     # guess still bounces.

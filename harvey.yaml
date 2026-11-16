@@ -58,7 +58,13 @@ channels:
   email:
     enabled: true
     provider: "gmail"          # gmail (recommended) | smtp | instantly
-    max_daily_sends: 50
+    max_daily_sends: 50         # per mailbox, all sends; the warm-up climbs to this
+    warmup:                     # new mailbox: 10/day wk 1, 20 wk 2, 30 wk 3, 50 from wk 4
+      enabled: true
+      ramp: [10, 20, 30, 50]
+      step_days: 7
+      max_bounce_rate: 0.03     # step up only while bounces stay under 3%; else hold
+      mailbox_caps: {}          # hard cap per address, e.g. {"test@gmail.com": 5}
     require_approval: true      # native providers: emails wait in the Outbox
     send_to_risky: false        # also send to catch-all domains (off = safest)
     max_bounce_rate: 0.05       # pause all sending if bounces exceed this

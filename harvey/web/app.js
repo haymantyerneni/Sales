@@ -1040,6 +1040,27 @@ async function loadUsage() {
 // the approval ladder exists to prevent. One email fills the pane; the rest
 // wait in the rail.
 
+// Today's per-mailbox send cap and warm-up stage (harvey/warmup.py).
+function sendCapCard(cap) {
+  if (!cap) return '';
+  if (cap.error) {
+    return '<div class="card" style="margin-bottom:16px"><p style="font-size:13px;color:var(--text-2)">' +
+      'Send cap unavailable: ' + escHtml(cap.error) + '</p></div>';
+  }
+  const held = cap.held
+    ? '<p style="color:var(--s-bad);font-size:13px;margin-top:6px">&#9888; Warm-up ' +
+      escHtml(cap.held) + '. It steps up again once the bounce rate is back under the limit.</p>'
+    : '';
+  return '<div class="card" style="margin-bottom:16px' +
+      (cap.held ? ';border-color:var(--s-bad-line)' : '') + '">' +
+    '<h2>Send cap: ' + escHtml(String(cap.cap)) + '/day ' +
+      '<span style="font-size:13px;color:var(--text-2);font-weight:400">' +
+      escHtml(String(cap.sent_today)) + ' sent today &middot; ' + escHtml(cap.mailbox) + '</span></h2>' +
+    '<p style="font-size:13px;color:var(--text-2)">' + escHtml(cap.summary) +
+      ' &middot; bounce rate ' + escHtml((cap.bounce_rate * 100).toFixed(1)) + '%</p>' +
+    held + '</div>';
+}
+
 async function loadOutbox() {
   const data = await api('/api/outbox');
   const banner = document.getElementById('outbox-banner');
@@ -1071,6 +1092,7 @@ async function loadOutbox() {
         '<p style="color:var(--text-2);font-size:13px">' + escHtml(data.paused) +
         '. Approved mail stays queued until you resume.</p></div>'
     : '';
+  banner.innerHTML += sendCapCard(data.send_cap);
 
   desk.innerHTML = pending.length ? renderDesk(pending, _desk.i) :
     '<div class="card">' + emptyState('&#10003;', 'Nothing to review',

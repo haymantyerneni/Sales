@@ -432,6 +432,9 @@ class Handler:
         if outbox_item:
             prospect = await self.state.get_prospect(outbox_item["prospect_id"])
 
+        if outbox_item:
+            # Per-mailbox bounce rate for the warm-up ramp (harvey/warmup.py).
+            await self.state.update_outbox_item(outbox_item["id"], error="bounced")
         if prospect:
             await self.state.update_prospect_email(
                 prospect.id, prospect.email, "invalid"
