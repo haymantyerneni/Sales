@@ -184,6 +184,14 @@ def test_format_requests_freeze_filter_and_status_colours():
     assert any('"cancelled"' in f for f in formulas)
 
 
+def test_unticked_drive_permission_is_caught():
+    from harvey.integrations.gmail import missing_scopes
+    from harvey.tracker import TRACKER_SCOPE
+    granted = "https://www.googleapis.com/auth/userinfo.email openid"
+    assert missing_scopes(TRACKER_SCOPE, granted) == ["https://www.googleapis.com/auth/drive.file"]
+    assert missing_scopes(TRACKER_SCOPE, granted + " https://www.googleapis.com/auth/drive.file") == []
+
+
 def test_id_token_email_is_read_from_the_payload():
     import base64
     from harvey.integrations.gmail import _id_token_email

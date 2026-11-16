@@ -67,6 +67,16 @@ def _save_token(data: dict, token_file=None):
         pass
 
 
+_SCOPE_ALIASES = {"email": "https://www.googleapis.com/auth/userinfo.email",
+                  "profile": "https://www.googleapis.com/auth/userinfo.profile"}
+
+
+def missing_scopes(requested: str, granted: str) -> list[str]:
+    """Scopes asked for but not granted (Google lets users untick each one)."""
+    norm = lambda s: {_SCOPE_ALIASES.get(x, x) for x in s.split()}  # noqa: E731
+    return sorted(norm(requested) - norm(granted))
+
+
 def _id_token_email(id_token: str) -> str:
     """The signed-in account's email from an id_token received directly
     from Google's token endpoint over TLS (so its payload is trusted as-is)."""
@@ -365,6 +375,11 @@ def run_auth_flow(client_id: str, client_secret: str, scope: str = SCOPE,
     if login_hint and account and account != login_hint.lower():
         print(f"  ✗ Signed in as {account}, but {login_hint} is the configured account. "
               "Run it again and pick the right account.")
+        return False
+    missing = missing_scopes(scope, data.get("scope", scope))
+    if missing:
+        print(f"  ✗ Google did not grant: {', '.join(missing)}.\n"
+              "    On the consent screen, tick every permission box, then run it again.")
         return False
     _save_token({
         "refresh_token": data["refresh_token"],
