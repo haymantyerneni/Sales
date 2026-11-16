@@ -1265,6 +1265,69 @@ function fbCampaign(i) {
   if (c) submitFeedback('campaign', c.id, 'Leave feedback on this campaign:');
 }
 
+// ── Import your own list (dry run first, then import) ──
+let _importPath = '';
+
+async function importPreview(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const panel = document.getElementById('import-panel');
+  panel.innerHTML = '<div class="card" style="margin-bottom:16px"><p style="font-size:13px">' +
+    'Checking ' + escHtml(file.name) + ': verifying emails and finding websites. ' +
+    'This takes a few seconds a row; nothing is added yet.</p></div>';
+  const data = await api('/api/import/preview?filename=' + encodeURIComponent(file.name),
+    {method: 'POST', body: file, headers: {'Content-Type': 'application/octet-stream'}});
+  if (!data || data.error) {
+    panel.innerHTML = '<div class="card" style="margin-bottom:16px"><p style="color:var(--s-bad)">' +
+      escHtml((data && data.error) || 'Import check failed.') + '</p></div>';
+    return;
+  }
+  _importPath = data.path;
+  const s = data.summary, e = s.email, w = s.website;
+  const rows = data.rows.map(r =>
+    '<tr><td>' + r.row + '</td><td>' + escHtml(r.action) + '</td><td>' +
+    escHtml(r.company_original) + '<br><b>' + escHtml(r.company) + '</b></td><td>' +
+    escHtml(r.name_original) + '<br><b>' + escHtml(r.first_name || '?') + '</b></td><td>' +
+    escHtml(r.email) + '<br>' + escHtml(r.email_status || '-') + '</td><td>' +
+    escHtml(r.website || r.website_source || '-') +
+    (r.website ? '<br>' + escHtml(r.website_source + ', ' + r.website_confidence) : '') +
+    '</td><td>' + escHtml([].concat(r.flags, r.skip ? [r.skip] : []).join('; ')) + '</td></tr>'
+  ).join('');
+  panel.innerHTML = '<div class="card" style="margin-bottom:16px">' +
+    '<h2>Import check: ' + escHtml(file.name) + '</h2>' +
+    '<p style="font-size:13px;color:var(--text-2)">' + s.rows + ' rows: ' + s.import +
+    ' ready, ' + s.review + ' need review, ' + s.skip + ' skipped. Emails: verified ' +
+    e.verified + ', risky ' + e.risky + ', invalid ' + e.invalid + ', unverified ' + e.unverified +
+    '. Websites: email domain ' + w['email domain'] + ', name search ' + w['name search'] +
+    ', given ' + w.given + ', not found ' + w['not found'] + '.</p>' +
+    '<p style="font-size:13px;color:var(--text-2)">To correct names or websites, edit the review sheet ' +
+    '(' + escHtml(data.review_path) + ') and import again. Rows marked "review" are not imported ' +
+    'until you set them to "import" there.</p>' +
+    '<div style="overflow-x:auto"><table class="table"><thead><tr><th>Row</th><th>Action</th>' +
+    '<th>Company / for emails</th><th>Name / first name</th><th>Email</th><th>Website</th>' +
+    '<th>Flags</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<div style="margin-top:12px;display:flex;gap:8px">' +
+    (s.import ? '<button class="btn btn-primary btn-sm" onclick="importCommit()">Import ' + s.import +
+      ' ready row(s)</button>' : '') +
+    '<button class="btn btn-secondary btn-sm" onclick="document.getElementById(\'import-panel\').innerHTML=\'\'">' +
+    'Cancel</button></div></div>';
+}
+
+async function importCommit() {
+  const panel = document.getElementById('import-panel');
+  const data = await api('/api/import/commit', {method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path: _importPath})});
+  if (!data || data.error) {
+    showToast((data && data.error) || 'Import failed.', 'error');
+    return;
+  }
+  panel.innerHTML = '';
+  showToast('Imported ' + data.added + ' contact(s). Drafts wait in the Outbox for your approval.',
+    'success');
+  loadProspects();
+}
+
 async function loadProspects() {
   const el = document.getElementById('prospects-table');
   const data = await api('/api/prospects');

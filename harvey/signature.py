@@ -43,6 +43,18 @@ def apply_signature(body: str, persona) -> str:
     return f"{text}\n\n{SIGN_OFF}\n{block}" if block else f"{text}\n\n{SIGN_OFF}"
 
 
+def add_opt_out(body: str, line: str) -> str:
+    """Email 1's polite opt-out as its last paragraph, before the sign-off
+    (which apply_signature adds). Idempotent; an empty line is a no-op."""
+    line = (line or "").strip()
+    if not line:
+        return body
+    text = strip_signature(body)
+    if line.lower() in text.lower():
+        return text
+    return f"{text.rstrip()}\n\n{line}"
+
+
 def unwrap_paragraphs(text: str) -> str:
     """One line per paragraph: joins line breaks inside a paragraph so the
     plain-text part never breaks mid-sentence. Blank lines are kept."""

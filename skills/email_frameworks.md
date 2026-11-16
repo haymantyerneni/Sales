@@ -41,6 +41,8 @@ Style rules are negotiable. These are not:
 5. One short question asking for a 15-minute call.
 6. "Warm regards," (the signature is added automatically).
 
+Harvey adds one polite opt-out line after the question, automatically, to every Email 1: "If this isn't relevant, just let me know and I won't follow up." Don't write your own. It isn't counted in the word limit.
+
 No detail found? Replace step 3 with one sentence on what businesses in their segment usually need, claiming nothing about them. Never mention rupees, INR or billing. Each paragraph is one line.
 
 **Which service goes first:**

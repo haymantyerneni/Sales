@@ -46,6 +46,16 @@ OPT_OUT_PATTERNS = (
     "unsubscribe",
     "opt out",
     "opt-out",
+    # Answers to Email 1's own line ("If this isn't relevant, just let me
+    # know and I won't follow up."):
+    "not relevant",
+    "isn't relevant",
+    "is not relevant",
+    "no need to follow up",
+    "don't follow up",
+    "do not follow up",
+    "please stop",
+    "stop following up",
     "remove me",
     "take me off",
     "stop emailing",
@@ -282,6 +292,9 @@ class Handler:
             # Honor opt-outs ALWAYS. No reply, no future contact.
             await self.state.update_conversation(convo.id, status="closed", stage="closed_lost")
             await self.state.update_prospect_status(prospect.id, "opted_out")
+            await self.state.add_suppression(lead_email, reason="asked to stop")
+            await self.state.cancel_pending_outbox_for_prospect(
+                prospect.id, reason="unsubscribed")
             await self.state.log_action(
                 action_type="opt_out",
                 agent="handler",

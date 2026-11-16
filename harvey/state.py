@@ -418,6 +418,17 @@ MIGRATIONS: list[str] = [
     ALTER TABLE outbox ADD COLUMN from_email TEXT DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_outbox_from_sent ON outbox(from_email, status, sent_at);
     """,
+    # ── v13: do-not-contact list (survives re-imports and deleted records) ──
+    """
+    CREATE TABLE IF NOT EXISTS suppression (
+        email TEXT PRIMARY KEY,
+        reason TEXT DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT OR IGNORE INTO suppression (email, reason)
+        SELECT lower(email), 'opted out' FROM prospects
+        WHERE status = 'opted_out' AND email != '';
+    """,
 ]
 
 BRAIN_PROVIDERS = ("claude", "codex")
@@ -858,7 +869,11 @@ class StateManager:
         status: str | None = None,
         due_before: str | None = None,
         limit: int = 200,
+        prefer_source: str = "",
     ) -> list[dict]:
+        """Outbox rows, oldest due first. With prefer_source, rows for
+        prospects from that source come first (imported lists before
+        Harvey's own leads when the daily cap is tight)."""
         where, params = [], []
         if status:
             where.append("status = ?")
@@ -869,7 +884,12 @@ class StateManager:
         sql = "SELECT * FROM outbox"
         if where:
             sql += " WHERE " + " AND ".join(where)
-        sql += " ORDER BY send_at ASC, created_at ASC LIMIT ?"
+        order = "send_at ASC, created_at ASC"
+        if prefer_source:
+            order = ("CASE WHEN prospect_id IN (SELECT id FROM prospects WHERE source = ?) "
+                     "THEN 0 ELSE 1 END, " + order)
+            params.append(prefer_source)
+        sql += f" ORDER BY {order} LIMIT ?"
         params.append(int(limit))
         async with self._connect() as db:
             db.row_factory = aiosqlite.Row
@@ -1375,6 +1395,28 @@ class StateManager:
                 return [dict(r) for r in await cursor.fetchall()]
 
     # ── Settings (operational flags: kill switch, counters) ──
+
+    # ── Do-not-contact list ──
+
+    async def add_suppression(self, email: str, reason: str = ""):
+        if not (email or "").strip():
+            return
+        async with self._connect() as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO suppression (email, reason) VALUES (?, ?)",
+                (_norm(email), reason))
+            await db.commit()
+
+    async def is_suppressed(self, email: str) -> bool:
+        async with self._connect() as db:
+            async with db.execute("SELECT 1 FROM suppression WHERE email = ?",
+                                  (_norm(email),)) as cur:
+                return await cur.fetchone() is not None
+
+    async def suppressed_emails(self) -> set[str]:
+        async with self._connect() as db:
+            async with db.execute("SELECT email FROM suppression") as cur:
+                return {r[0] for r in await cur.fetchall()}
 
     async def get_setting(self, key: str, default: str = "") -> str:
         async with self._connect() as db:

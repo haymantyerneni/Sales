@@ -99,6 +99,24 @@ _SENIOR_KEYWORDS = (
 )
 
 
+def unwrap_bing_redirect(href: str) -> str:
+    """Bing now links results through bing.com/ck/a?...&u=a1<base64url of the
+    real URL>. Return the real URL (or href unchanged when it isn't one)."""
+    import base64
+    try:
+        parsed = urlparse(href)
+        if not parsed.netloc.endswith("bing.com") or not parsed.path.startswith("/ck/"):
+            return href
+        u = (parse_qs(parsed.query).get("u") or [""])[0]
+        if not u.startswith("a1"):
+            return href
+        enc = u[2:]
+        real = base64.urlsafe_b64decode(enc + "=" * (-len(enc) % 4)).decode("utf-8", "replace")
+        return real if real.startswith("http") else href
+    except Exception:
+        return href
+
+
 class Scout:
     def __init__(
         self,
@@ -433,7 +451,7 @@ class Scout:
             snippet_el = item.select_one(".b_caption p")
             if not (link and link.get("href")):
                 continue
-            href = self._attr_str(link.get("href"))
+            href = unwrap_bing_redirect(self._attr_str(link.get("href")))
             snippet = snippet_el.get_text().strip() if snippet_el else ""
             if href.startswith("http"):
                 results.append((href, snippet))

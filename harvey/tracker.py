@@ -22,7 +22,7 @@ from pathlib import Path
 import aiosqlite
 import httpx
 
-from harvey.models.prospect import TARGETING_PREFIX
+from harvey.models.prospect import IMPORT_PREFIX, TARGETING_PREFIX
 from harvey.paths import PROJECT_ROOT
 
 logger = logging.getLogger("harvey.tracker")
@@ -120,14 +120,17 @@ def build_row(prospect: dict, company: dict, items: list[dict], tz: str) -> list
     notes_lines = [ln.strip() for ln in (prospect.get("personalization_notes") or "").splitlines()
                    if ln.strip()]
     fallback = any(ln.startswith(TARGETING_PREFIX) for ln in notes_lines)
-    facts = [ln for ln in notes_lines if not ln.startswith(TARGETING_PREFIX)]
+    imported = [ln[len(IMPORT_PREFIX):].strip() for ln in notes_lines
+                if ln.startswith(IMPORT_PREFIX)]
+    facts = [ln for ln in notes_lines if not ln.startswith((TARGETING_PREFIX, IMPORT_PREFIX))]
     status = person_status(prospect, items)
+    uploaded = source_label(prospect.get("source", "")) == "Uploaded list"
 
     phones = []
     if company.get("phone"):
         phones.append(f"Company: {company['phone']}")
     if prospect.get("phone"):
-        phones.append(f"Direct: {prospect['phone']}")
+        phones.append(f"{'From list' if uploaded else 'Direct'}: {prospect['phone']}")
     website = company.get("website") or (f"https://{company['domain']}" if company.get("domain") else "")
 
     seq = [i for i in items if (i.get("kind") or "sequence") == "sequence"]
@@ -142,6 +145,8 @@ def build_row(prospect: dict, company: dict, items: list[dict], tz: str) -> list
     summary = _sent_summary(items)
     if summary:
         notes.append(f"Sent: {summary}.")
+    if imported:
+        notes.append(" ".join(imported))
     if facts:
         notes.append(" ".join(facts))
     segment = segment_for(prospect.get("industry", ""), company.get("industry", ""),
@@ -152,7 +157,7 @@ def build_row(prospect: dict, company: dict, items: list[dict], tz: str) -> list
         source_label(prospect.get("source", "")),
         " ".join(filter(None, [prospect.get("first_name"), prospect.get("last_name")])),
         prospect.get("title") or "",
-        "CEO fallback" if fallback else "CTO",
+        "Uploaded contact" if uploaded else ("CEO fallback" if fallback else "CTO"),
         company.get("name") or prospect.get("company") or "",
         website,
         company.get("location") or "",

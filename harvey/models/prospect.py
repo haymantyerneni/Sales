@@ -14,6 +14,10 @@ def _utcnow() -> datetime:
 # fallback target (no CTO-level contact at the company). Bookkeeping only:
 # the Writer never shows it to the model.
 TARGETING_PREFIX = "Targeting:"
+# Prefix of notes lines written by the list importer (website found, review
+# flags, the owner's own note). Shown in the tracker, never to the Writer.
+IMPORT_PREFIX = "Import:"
+BOOKKEEPING_PREFIXES = (TARGETING_PREFIX, IMPORT_PREFIX)
 
 
 class Prospect(BaseModel):

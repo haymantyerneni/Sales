@@ -26,8 +26,8 @@ from harvey.config import HarveyConfig
 from harvey.gate import BANNED_PHRASES, URL_RE
 from harvey.integrations.mail_provider import NATIVE_PROVIDERS
 from harvey.models.campaign import Campaign, EmailStep
-from harvey.models.prospect import TARGETING_PREFIX
-from harvey.signature import (apply_signature, placeholders, strip_signature,
+from harvey.models.prospect import BOOKKEEPING_PREFIXES, TARGETING_PREFIX  # noqa: F401
+from harvey.signature import (add_opt_out, apply_signature, placeholders, strip_signature,
                               unwrap_paragraphs)
 from harvey.state import StateManager
 
@@ -469,7 +469,8 @@ class Writer:
                 step=1,
                 to_email=prospect.email,
                 subject=draft["subject"],
-                body=apply_signature(draft["body"], self.config.persona),
+                body=apply_signature(add_opt_out(draft["body"], self._opt_out_line()),
+                                     self.config.persona),
                 send_at=now,
                 status=status,
                 provider=provider,
@@ -500,6 +501,10 @@ class Writer:
                 f"Writer: drafted {drafted} personalized first email(s) "
                 f"({'awaiting approval' if require_approval else 'approved'})."
             )
+
+    def _opt_out_line(self) -> str:
+        return getattr(self.config.channels.email, "opt_out_line",
+                       "If this isn't relevant, just let me know and I won't follow up.")
 
     def _base_prompt(self) -> str:
         prompt = self.brain.load_prompt(
@@ -572,7 +577,7 @@ class Writer:
         # The "Targeting:" line is bookkeeping (fallback contact), not a fact.
         notes = "\n".join(
             ln for ln in (prospect.personalization_notes or "").splitlines()
-            if ln.strip() and not ln.strip().startswith(TARGETING_PREFIX))
+            if ln.strip() and not ln.strip().startswith(BOOKKEEPING_PREFIXES))
         if notes:
             facts.append(f"- Research notes: {notes}")
 
@@ -603,7 +608,7 @@ come from these facts. If a fact isn't listed, you don't know it:
 
 SEGMENT: {segment['label']} (most relevant to them: {segment['angle']}).
 
-Write it in this order, crisp and direct, for a {prospect.title or 'technology head'}:
+Write it in this order, crisp and direct, for a {prospect.title or 'business decision-maker'}:
 - "Hi {first or '{{first_name}}'}," on its own line.
 - Do NOT introduce yourself ("I'm {self.sender_first_name} from ..."): the From
   name and signature already say who you are.

@@ -21,8 +21,10 @@ from harvey.config import HarveyConfig, EnvConfig
 from harvey.gate import html_part_problems, pre_send_check
 from harvey.integrations.instantly import InstantlyClient
 from harvey.integrations.mail_provider import NATIVE_PROVIDERS, get_mail_provider
-from harvey.signature import apply_signature, html_alternative, placeholders
+from harvey.signature import add_opt_out, apply_signature, html_alternative, placeholders
 from harvey.warmup import warmup_status
+
+IMPORT_SOURCE = "uploaded_list"   # harvey/importer.py
 from harvey.state import StateManager
 
 logger = logging.getLogger("harvey.sender")
@@ -351,6 +353,13 @@ class Sender:
 
         await self._drain_due()
 
+    def _email1_opt_out(self, body: str, step: int) -> str:
+        if int(step) != 1:
+            return body
+        return add_opt_out(body, getattr(
+            self.config.channels.email, "opt_out_line",
+            "If this isn't relevant, just let me know and I won't follow up."))
+
     def _render(self, text: str, prospect) -> str:
         """Fill merge variables. The pre-send gate rejects any leftovers."""
         replacements = {
@@ -395,6 +404,8 @@ class Sender:
                 continue
             if prospect.status not in SENDABLE_STATUSES or is_do_not_contact(prospect):
                 continue
+            if await self.state.is_suppressed(email):
+                continue
             if (prospect.email_status or "guess") not in sendable_email:
                 skipped += 1
                 continue
@@ -411,7 +422,8 @@ class Sender:
                     to_email=email,
                     subject=self._render(step.subject, prospect),
                     body=apply_signature(
-                        self._render(step.body, prospect), self.config.persona
+                        self._email1_opt_out(self._render(step.body, prospect), step.step),
+                        self.config.persona,
                     ),
                     send_at=send_at.isoformat(),
                     status=initial_status,
@@ -557,8 +569,10 @@ class Sender:
             return
 
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        imports = getattr(self.config, "imports", None)
+        prefer = IMPORT_SOURCE if getattr(imports, "priority", True) else ""
         due = await self.state.get_outbox(
-            status="approved", due_before=now, limit=budget * 3
+            status="approved", due_before=now, limit=budget * 3, prefer_source=prefer
         )
         if not due:
             return
@@ -584,7 +598,7 @@ class Sender:
 
             # Do-not-contact: test contacts and cancelled people never receive
             # anything again, whatever the item (sequence or reply).
-            if is_do_not_contact(prospect):
+            if is_do_not_contact(prospect) or await self.state.is_suppressed(item["to_email"]):
                 await self.state.update_outbox_item(
                     item["id"], status="cancelled",
                     error=f"do not contact (source '{prospect.source}', status '{prospect.status}')",

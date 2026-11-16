@@ -692,6 +692,60 @@ def _state():
     return StateManager(db_path=str(DB_PATH))
 
 
+def _import_upload_path(filename: str) -> Path:
+    import re as _re
+    from harvey.importer import IMPORT_DIR
+    name = Path(filename or "list.xlsx").name
+    stem, suffix = Path(name).stem, Path(name).suffix.lower()
+    if suffix not in (".xlsx", ".csv"):
+        raise ValueError("Upload an .xlsx or .csv file.")
+    safe = _re.sub(r"[^A-Za-z0-9_-]+", "_", stem)[:60] or "list"
+    return IMPORT_DIR / "uploads" / f"{safe}{suffix}"
+
+
+@app.post("/api/import/preview")
+async def import_preview(request: Request):
+    """Dry run of an uploaded list (raw file body, ?filename=...). Adds nothing."""
+    from dataclasses import asdict
+    from harvey import importer
+    from harvey.config import load_config, load_env
+    try:
+        path = _import_upload_path(request.query_params.get("filename", ""))
+        body = await request.body()
+        if not body or len(body) > 10 * 1024 * 1024:
+            return {"error": "Empty file, or larger than 10 MB."}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(body)
+        state = _state()
+        await state.init_db()
+        result = await importer.dry_run(path, state, load_config(), load_env())
+        return {"path": str(path), "summary": result["summary"],
+                "review_path": result["review_path"],
+                "rows": [asdict(r) for r in result["plan"]]}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/import/commit")
+async def import_commit(request: Request):
+    """Add the rows marked 'import' in the dry run of this uploaded file."""
+    from harvey import importer
+    from harvey.config import load_config, load_env
+    try:
+        data = await request.json()
+        path = _import_upload_path(Path(str(data.get("path", ""))).name)
+        if not path.exists():
+            return {"error": "Upload the file again: no dry run found."}
+        state = _state()
+        await state.init_db()
+        res = await importer.commit(path, state, load_config(), load_env())
+        return {"added": len(res["added"]), "held": [r.row for r in res["held"]],
+                "skipped": [{"row": r.row, "email": r.email, "why": why}
+                            for r, why in res["skipped"]]}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/outbox")
 async def get_outbox_api():
     """Outbox queue + kill-switch state for the Outbox tab."""

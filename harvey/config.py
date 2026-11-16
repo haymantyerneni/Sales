@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from harvey.paths import PROJECT_ROOT
 
@@ -157,6 +157,9 @@ class EmailChannelConfig(BaseModel):
     # Your own addresses for test sends: exempt from weekdays_only and the
     # send window (never from the daily cap, approval or the gate).
     window_exempt: list[str] = []
+    # Closing line added to every Email 1 (before the sign-off). A reply
+    # asking to stop marks the person unsubscribed and do-not-contact.
+    opt_out_line: str = "If this isn't relevant, just let me know and I won't follow up."
 
     @field_validator("window_exempt")
     @classmethod
@@ -314,7 +317,16 @@ class TrackerConfig(BaseModel):
         return v
 
 
+class ImportConfig(BaseModel):
+    """Owner-uploaded prospect lists (`harvey import`)."""
+    # Imported prospects go before Harvey's own leads when the daily cap is
+    # tight. Both share the one cap.
+    priority: bool = True
+
+
 class HarveyConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     persona: PersonaConfig
     product: ProductConfig
     icp: ICPConfig
@@ -322,6 +334,7 @@ class HarveyConfig(BaseModel):
     usage: UsageConfig = UsageConfig()
     brain: BrainConfig = BrainConfig()
     tracker: TrackerConfig = TrackerConfig()
+    imports: ImportConfig = Field(default_factory=ImportConfig, alias="import")
 
 
 class EnvConfig(BaseModel):

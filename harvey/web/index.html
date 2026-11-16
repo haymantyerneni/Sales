@@ -148,8 +148,11 @@
     <div style="display:flex;gap:8px;flex-shrink:0">
       <a class="btn btn-secondary btn-sm" href="/api/export/prospects.csv" download>Export deliverable CSV</a>
       <a class="btn btn-secondary btn-sm" href="/api/export/prospects.csv?all=true" download>Export all</a>
+      <button class="btn btn-primary btn-sm" onclick="document.getElementById('import-file').click()">Import list</button>
+      <input type="file" id="import-file" accept=".xlsx,.csv" style="display:none" onchange="importPreview(this)">
     </div>
   </div>
+  <div id="import-panel"></div>
   <div id="prospects-table"></div>
 </div>
 

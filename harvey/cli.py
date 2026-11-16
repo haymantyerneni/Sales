@@ -453,6 +453,66 @@ def cmd_tracker(args):
     asyncio.run(_sync())
 
 
+def cmd_import(args):
+    """Import your own prospect list: dry run first, --commit to add."""
+    from pathlib import Path
+    from harvey import importer
+
+    if args.template:
+        path = importer.write_template()
+        print(f"\n  Template written: {path}\n")
+        return
+    if not args.file:
+        print("\n  Usage: harvey import <file.xlsx|file.csv> [--commit]\n"
+              "         harvey import --template\n")
+        sys.exit(1)
+    path = Path(args.file)
+    if not path.exists():
+        print(f"\n  File not found: {path}\n")
+        sys.exit(1)
+
+    from harvey.config import load_config, load_env
+    from harvey.state import StateManager
+
+    async def _run():
+        state = StateManager()
+        await state.init_db()
+        config, env = load_config(), load_env()
+        if args.commit:
+            try:
+                res = await importer.commit(path, state, config, env)
+            except ValueError as e:
+                print(f"\n  ✗ {e}\n")
+                sys.exit(1)
+            print(f"\n  Imported {len(res['added'])} prospect(s) from {path.name} "
+                  "(Source = Uploaded list).")
+            if res["held"]:
+                print(f"  Not imported, still marked 'review': {len(res['held'])} "
+                      f"(rows {', '.join(str(r.row) for r in res['held'])}).")
+            for r, why in res["skipped"]:
+                print(f"  Skipped row {r.row} ({r.email}): {why}")
+            print("  Drafts are written on Harvey's next cycle and wait in the Outbox "
+                  "for your approval.\n")
+            from harvey.tracker import sync_tracker_safely
+            await sync_tracker_safely(config, env, state.db_path)
+            return
+
+        print(f"\n  Dry run for {path.name}: nothing is added yet.")
+        print("  Checking emails and websites (free web search, a few seconds a row)...")
+
+        def progress(done, total):
+            print(f"    {done}/{total}", end="\r", flush=True)
+        try:
+            result = await importer.dry_run(path, state, config, env, progress=progress)
+        except ValueError as e:
+            print(f"\n  ✗ {e}\n")
+            sys.exit(1)
+        print("\n" + importer.format_summary(result))
+        print(f"\n  Review sheet (edit the blue columns): {result['review_path']}")
+        print(f"  When it looks right: harvey import \"{path}\" --commit\n")
+    asyncio.run(_run())
+
+
 def cmd_outbox(args):
     """Review and approve queued outgoing emails."""
     from harvey.state import StateManager
@@ -782,6 +842,14 @@ def main():
     sub.set_defaults(func=cmd_tracker)
 
     # harvey outbox
+    sub = subparsers.add_parser("import", help="Import your own prospect list (.xlsx/.csv)")
+    sub.add_argument("file", nargs="?", help="The .xlsx or .csv file")
+    sub.add_argument("--commit", action="store_true",
+                     help="Add the rows marked 'import' in the dry run's review sheet")
+    sub.add_argument("--template", action="store_true",
+                     help="Write data/import_template.xlsx and exit")
+    sub.set_defaults(func=cmd_import)
+
     sub = subparsers.add_parser("outbox", help="Review/approve queued emails")
     sub.add_argument("--approve", metavar="ID", default="", help="Approve one item")
     sub.add_argument("--approve-all", action="store_true", help="Approve all pending")

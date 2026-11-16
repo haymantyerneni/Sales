@@ -59,6 +59,7 @@ channels:
     enabled: true
     provider: "gmail"          # gmail (recommended) | smtp | instantly
     max_daily_sends: 50         # per mailbox, all sends; the warm-up climbs to this
+    opt_out_line: "If this isn't relevant, just let me know and I won't follow up."   # end of every Email 1
     warmup:                     # new mailbox: 10/day wk 1, 20 wk 2, 30 wk 3, 50 from wk 4
       enabled: true
       ramp: [10, 20, 30, 50]
@@ -93,3 +94,7 @@ tracker:
   account: ""                   # Google account whose Drive holds the sheet; then `harvey tracker auth`
   sheet_name: "Lead Tracker"
   excel_path: data/lead_tracker.xlsx
+
+# Your own uploaded lists (harvey import <file>)
+import:
+  priority: true   # send imported prospects before Harvey's own leads
