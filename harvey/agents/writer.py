@@ -44,7 +44,7 @@ MAX_ATTEMPTS = 3
 # Follow-up cadence: day 4 and day 10 after email 1 actually goes out.
 SEQUENCE_DELAYS = (0, 4, 6)
 
-FIRST_EMAIL_MAX_WORDS = 70               # "under N words", from "Hi" to the question
+FIRST_EMAIL_MAX_WORDS = 70               # "under N words", after the greeting, to the question
 FOLLOWUP_MAX_WORDS = {2: 40, 3: 25}
 
 # ── Services and segments ─────────────────────────────────────────────
@@ -123,6 +123,43 @@ def segment_for(*texts: str) -> dict:
             if any(k in blob for k in seg["keywords"]):
                 return seg
     return DEFAULT_SEGMENT
+
+
+# How a person says each service in a sentence (FU2's closing note), as
+# opposed to the services-list phrase.
+SERVICE_NATURAL = {
+    "microsoft": "Microsoft licensing",
+    "vps": "servers",
+    "migration": "a cloud move",
+    "storage": "backups",
+    "managed": "IT support",
+}
+# Services-list phrases that read clunky inside a sentence.
+LIST_PHRASE_RE = re.compile(
+    r"storage and backup|24x7 soc and managed it|vps and dedicated servers|dedicated servers from",
+    re.IGNORECASE)
+
+
+GREETING_RE = re.compile(r"^\s*(hi|hello|dear)\b[^\n]*,\s*\n", re.IGNORECASE)
+
+
+def body_words(core: str) -> int:
+    """Words the limits apply to: everything from after the "Hi Name,"
+    greeting line to the question, sign-off and signature excluded."""
+    return len(GREETING_RE.sub("", core, count=1).split())
+
+
+def natural_services(services: list[str], n: int = 2) -> str:
+    """'backups or IT support': the 1-2 leading services, as said aloud."""
+    by_phrase = {v: k for k, v in SERVICES.items()}
+    words = []
+    for svc in services:
+        nat = SERVICE_NATURAL.get(by_phrase.get(svc, ""), "")
+        if nat and nat not in words:
+            words.append(nat)
+        if len(words) == n:
+            break
+    return " or ".join(words)
 
 
 # A company that works with Microsoft (builds on it, resells it, runs on it)
@@ -267,7 +304,7 @@ def first_email_problems(body: str, first_name: str, services: list[str],
         problems.append("no lists in email 1; the services go in one sentence")
     if URL_RE.search(core) or re.search(r"\bwww\.", core):
         problems.append("no links in email 1")
-    words = len(core.split())
+    words = body_words(core)
     if words >= FIRST_EMAIL_MAX_WORDS:
         problems.append(f"must be under {FIRST_EMAIL_MAX_WORDS} words before the sign-off (it is {words})")
     return problems
@@ -288,10 +325,13 @@ def followup_problems(body: str, step: int, first_name: str = "{{first_name}}",
         problems.append("follow-ups must not repeat the services")
     if RUPEE_BILLING_RE.search(core):
         problems.append("do not mention rupee billing")
+    if step == 3 and LIST_PHRASE_RE.search(core):
+        problems.append(f'name services in natural wording ("backups or IT support"), not the '
+                        f'list phrase "{LIST_PHRASE_RE.search(core).group(0)}"')
     if len(URL_RE.findall(core)) > 1:
         problems.append("at most one link in a follow-up")
     limit = FOLLOWUP_MAX_WORDS.get(step)
-    words = len(core.split())
+    words = body_words(core)
     if limit and words >= limit:
         problems.append(f"must be under {limit} words before the sign-off (it is {words})")
     return problems
@@ -338,6 +378,7 @@ class Writer:
         prospects_with_email = [
             p for p in new_prospects
             if p.email and (p.email_status or "guess") in deliverable
+            and (p.source or "").strip().lower() != "test"
         ]
         if not prospects_with_email:
             logger.info(
@@ -580,7 +621,7 @@ Write it in this order, crisp and direct, for a {prospect.title or 'technology h
 - Each paragraph is ONE line: never break a line inside a paragraph.
 - Never mention rupees or billing.
 
-Length: UNDER {FIRST_EMAIL_MAX_WORDS} words from "Hi" to the question. Count them.
+Length: UNDER {FIRST_EMAIL_MAX_WORDS} words after the "Hi" line, up to the question. Count them.
 
 Reference (style only; never copy it):
 Subject: Microsoft licensing & hosting for Saras India
@@ -614,9 +655,17 @@ If it's useful, we could start with a quick review of Saras India's Microsoft li
 Would a 15-minute call this week or next suit you?
 
 FOLLOW-UP 2 (day 10, under {FOLLOWUP_MAX_WORDS[3]} words):
-- "Hi {first or '{{first_name}}'}," then: last note from you; if {lead.split(' from ')[0].lower()}
-  or the like comes up at {prospect.company} later, they can reply here. One
-  short question asking whether you may check back in a few months.
+- "Hi {first or '{{first_name}}'}," then: last note from you; if
+  {natural_services(services)} come up at {prospect.company}, they can just reply
+  here. One short question asking whether you may check back in a few months.
+- Name the 1-2 most relevant services in natural, everyday wording (as above),
+  never a services-list phrase like "if storage and backup comes up".
+Reference closing note (style only):
+Hi Chuck,
+
+Last note from me. If backups or IT support come up at vCollab, just reply here.
+
+May I check back in a few months?
 
 All three: never name a weekday (say "this week or next"), each paragraph
 one line, last line "Warm regards," with nothing after it, exactly one "?".

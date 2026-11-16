@@ -51,17 +51,78 @@ No detail found? Replace step 3 with one sentence on what businesses in their se
 - Manufacturing / retail chains / multi-site: storage and backup, managed IT
 - D2C / e-commerce: VPS and dedicated servers
 
-**Reference (style only; never copy it verbatim):**
+### Approved reference sequences
+
+These are the owner-approved style. Match their shape, length and tone; never copy their wording to another prospect. Each sequence keeps ONE angle across all three emails.
+
+**Saras India** (Microsoft-focused IT firm; Founder, as no CTO was found)
+
 ```
-Subject: Microsoft licensing & hosting for Saras India
+Subject: Microsoft licensing & servers for Saras India
 
 Hi Haymant,
 
-I came across Saras India's SharePoint and Office 365 work, both online and on-premises. Firms delivering that for clients usually need reliable servers and a dependable source for Microsoft licences.
+I noticed Saras India builds SharePoint and Office 365 solutions, including SharePoint Server on-premises. Teams doing that for clients usually need dependable Microsoft licences and solid servers.
 
 That's what we do at CloudBox99 in Hyderabad: Microsoft licensing, VPS and dedicated servers from ₹999/month, cloud migration, storage and backup, and 24x7 SOC and managed IT.
 
+Could we set up a 15-minute call this week?
+
+Warm regards,
+```
+
+```
+Hi Haymant,
+
+One easy place to start would be a review of Saras India's Microsoft licensing, or servers for the on-premises SharePoint projects you deliver.
+
+Is a 15-minute call this week or next convenient?
+
+Warm regards,
+```
+
+```
+Hi Haymant,
+
+Final note. Whenever Microsoft licensing comes up at Saras India, reply here.
+
+Could I check back in a few months?
+
+Warm regards,
+```
+
+**vCollab** (coworking, three sites; storage and backup leads)
+
+```
+Subject: Storage and IT for vCollab's three sites
+
+Hi Chuck,
+
+I came across vCollab's coworking and managed office spaces in Madhapur, HITEC City and Kothaguda. Running three sites usually means keeping data, backups and IT consistent at each one.
+
+That's what we do at CloudBox99 in Hyderabad: storage and backup, 24x7 SOC and managed IT, Microsoft licensing, VPS and dedicated servers from ₹999/month, and cloud migration.
+
 Would a 15-minute call this week make sense?
+
+Warm regards,
+```
+
+```
+Hi Chuck,
+
+If it's useful, we could start with one backup setup that covers all three vCollab sites, Madhapur, HITEC City and Kothaguda.
+
+Would a 15-minute call this week or next suit you?
+
+Warm regards,
+```
+
+```
+Hi Chuck,
+
+Last note from me. If backups or IT support come up at vCollab, just reply here.
+
+May I check back in a few months?
 
 Warm regards,
 ```
@@ -72,24 +133,17 @@ Continue Email 1's angle with the same facts: offer ONE concrete, easy starting 
 
 For a Microsoft-focused company, offer a Microsoft licensing review or servers for their on-premises work, never "moving off Azure".
 
-```
-Hi Haymant,
-
-If it's useful, we could start with a quick review of Saras India's Microsoft licensing or the servers behind your on-premises SharePoint work.
-
-Would a 15-minute call this week or next suit you?
-
-Warm regards,
-```
-
 ### Follow-up 2 (day 10, same thread): under 25 words
 
-Last note, on the same angle; they can reply any time; ask once whether you may check back in a few months.
+The closing note, on the same angle: last note from you; they can reply any time; ask once whether you may check back in a few months.
 
+Name the 1-2 most relevant services in natural, everyday wording, the way a person would say them: "backups or IT support", "Microsoft licensing", "servers or hosting", "security monitoring". Never paste a services-list phrase into the sentence ("if storage and backup comes up", "if 24x7 SOC and managed IT comes up").
+
+Reference closing note:
 ```
-Hi Haymant,
+Hi Chuck,
 
-Last note. If Microsoft licensing comes up at Saras India, just reply here.
+Last note from me. If backups or IT support come up at vCollab, just reply here.
 
 May I check back in a few months?
 

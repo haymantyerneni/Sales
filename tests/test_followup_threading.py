@@ -475,6 +475,55 @@ def test_follow_ups_never_name_weekdays_or_assume_tools():
     assert any("Hi Haymant," in p for p in followup_problems(REFERENCE_FU1, 2, "Haymant", facts))
 
 
+CLOSING_NOTE = """Hi Chuck,
+
+Last note from me. If backups or IT support come up at vCollab, just reply here.
+
+May I check back in a few months?
+
+Warm regards,"""
+
+
+def test_closing_note_names_services_naturally():
+    from harvey.agents.writer import (body_words, followup_problems, natural_services,
+                                      segment_for, services_for)
+    from harvey.signature import strip_signature
+    assert followup_problems(CLOSING_NOTE, 3, "Chuck") == []
+    assert body_words(strip_signature(CLOSING_NOTE)) == 24          # greeting not counted
+    clunky = CLOSING_NOTE.replace("backups or IT support come up", "storage and backup comes up")
+    assert any("natural wording" in p for p in followup_problems(clunky, 3, "Chuck"))
+    soc = CLOSING_NOTE.replace("backups or IT support", "24x7 SOC and managed IT")
+    assert any("natural wording" in p for p in followup_problems(soc, 3, "Chuck"))
+    assert natural_services(services_for(segment_for("coworking spaces"))) == "backups or IT support"
+    assert natural_services(services_for(segment_for("software"), microsoft=True)) == \
+        "Microsoft licensing or servers"
+
+
+@pytest.mark.asyncio
+async def test_test_contacts_are_never_sent_anything(state):
+    import aiosqlite
+    from harvey.agents.sender import is_do_not_contact
+    pid, campaign = await seed(state, email="me@gmail.com")
+    async with aiosqlite.connect(state.db_path) as db:
+        await db.execute("UPDATE prospects SET source='test', status='cancelled' WHERE id=?", (pid,))
+        await db.commit()
+    assert is_do_not_contact(await state.get_prospect(pid))
+    provider = FakeProvider()
+    sender = make_sender(state, provider, exempt=["me@gmail.com"])
+    await sender._run_native()
+    assert await state.get_sequence_rows(campaign.id, pid) == []      # never staged
+    # Even items that somehow got approved are cancelled, replies included.
+    await state.add_outbox_item(prospect_id=pid, campaign_id=campaign.id, step=1,
+                                to_email="me@gmail.com", subject="Hosting for Acme",
+                                body="Hi,\n\nCall?", send_at=_now().isoformat(), status="approved")
+    await state.add_outbox_item(prospect_id=pid, to_email="me@gmail.com", subject="Re: hi",
+                                kind="reply", body="Hi,\n\nThanks.", send_at=_now().isoformat(),
+                                status="approved")
+    await sender._run_native()
+    assert provider.sent == []
+    assert [r["status"] for r in await state.get_outbox()] == ["cancelled", "cancelled"]
+
+
 def test_paragraphs_are_one_line_each():
     from harvey.signature import apply_signature, unwrap_paragraphs
     wrapped = "Hi Ravi,\n\nI came across Acme's work on\nlogistics software for\ndistributors.\n\nOpen to a call?"

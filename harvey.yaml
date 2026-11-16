@@ -78,3 +78,12 @@ usage:
     start: "22:00"
     end: "07:00"
     timezone: "America/New_York"
+
+# Lead tracker: one row per person, written (never read) by Harvey at the
+# end of every heartbeat cycle and by `harvey tracker sync`.
+tracker:
+  enabled: false
+  backend: google_sheets        # google_sheets | excel
+  account: ""                   # Google account whose Drive holds the sheet; then `harvey tracker auth`
+  sheet_name: "Lead Tracker"
+  excel_path: data/lead_tracker.xlsx

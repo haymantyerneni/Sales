@@ -43,6 +43,16 @@ EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
 # we never re-send to someone already contacted, replied, opted out, or lost.
 SENDABLE_STATUSES = {"new", "queued"}
 
+# People who must never be emailed again: test contacts (the owner's own
+# addresses, kept for the tracker) and anyone whose outreach was cancelled.
+DO_NOT_CONTACT_SOURCES = {"test"}
+DO_NOT_CONTACT_STATUSES = {"cancelled", "opted_out"}
+
+
+def is_do_not_contact(prospect) -> bool:
+    return ((getattr(prospect, "source", "") or "").strip().lower() in DO_NOT_CONTACT_SOURCES
+            or (getattr(prospect, "status", "") or "") in DO_NOT_CONTACT_STATUSES)
+
 # Email confidence levels safe to send to. "verified" only by default;
 # "risky" (catch-all domains) is opt-in via config. Never send to a "guess"
 # or "invalid" address — that bounces and burns the sending domain.
@@ -382,7 +392,7 @@ class Sender:
             email = prospect.email.strip().lower()
             if not EMAIL_RE.match(email) or email in seen_emails:
                 continue
-            if prospect.status not in SENDABLE_STATUSES:
+            if prospect.status not in SENDABLE_STATUSES or is_do_not_contact(prospect):
                 continue
             if (prospect.email_status or "guess") not in sendable_email:
                 skipped += 1
@@ -567,6 +577,16 @@ class Sender:
                 await self.state.update_outbox_item(
                     item["id"], status="failed", error="prospect missing"
                 )
+                continue
+
+            # Do-not-contact: test contacts and cancelled people never receive
+            # anything again, whatever the item (sequence or reply).
+            if is_do_not_contact(prospect):
+                await self.state.update_outbox_item(
+                    item["id"], status="cancelled",
+                    error=f"do not contact (source '{prospect.source}', status '{prospect.status}')",
+                )
+                logger.info(f"Sender: {item['to_email']} is do-not-contact; item cancelled.")
                 continue
 
             # Stop-on-reply / opt-out: never continue a sequence after contact.

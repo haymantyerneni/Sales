@@ -392,6 +392,50 @@ def cmd_gmail(args):
         asyncio.run(_test())
 
 
+def cmd_tracker(args):
+    """Lead tracker: auth (one-time Google sign-in) / sync / link."""
+    from harvey.config import load_config, load_env
+
+    env = load_env()
+    config = load_config()
+    if args.tracker_action == "auth":
+        from harvey.integrations.gmail import run_auth_flow
+        from harvey.tracker import TOKEN_FILE, TRACKER_SCOPE
+        if not config.tracker.account:
+            print("\n  Set tracker.account in harvey.local.yaml first (the Google account "
+                  "whose Drive holds the sheet).\n")
+            sys.exit(1)
+        print(f"\n  Sign in as {config.tracker.account}. Harvey asks only for access to "
+              "files it creates itself (drive.file), plus your email address.")
+        ok = run_auth_flow(env.gmail_client_id, env.gmail_client_secret, scope=TRACKER_SCOPE,
+                           token_file=TOKEN_FILE, login_hint=config.tracker.account,
+                           label="Lead tracker")
+        sys.exit(0 if ok else 1)
+
+    if args.tracker_action == "link":
+        from harvey.tracker import tracker_link
+        if config.tracker.backend == "google_sheets":
+            link = tracker_link()
+        else:
+            link = config.tracker.excel_path
+        print(f"\n  {link or 'No tracker created yet: run harvey tracker sync'}\n")
+        return
+
+    from harvey.state import StateManager
+    from harvey.tracker import sync_tracker
+
+    async def _sync():
+        state = StateManager()
+        await state.init_db()
+        try:
+            n, where = await sync_tracker(config, env, state.db_path)
+        except Exception as e:
+            print(f"\n  ✗ Tracker sync failed: {e}\n")
+            sys.exit(1)
+        print(f"\n  ✓ Tracker synced: {n} row(s)\n  {where}\n")
+    asyncio.run(_sync())
+
+
 def cmd_outbox(args):
     """Review and approve queued outgoing emails."""
     from harvey.state import StateManager
@@ -712,6 +756,13 @@ def main():
     sub.add_argument("gmail_action", choices=["auth", "test"],
                      help="auth: one-time OAuth; test: verify connection")
     sub.set_defaults(func=cmd_gmail)
+
+    # harvey tracker auth|sync|link
+    sub = subparsers.add_parser("tracker", help="Lead tracker sheet (write-only)")
+    sub.add_argument("tracker_action", choices=["sync", "auth", "link"],
+                     help="sync: rewrite the tracker now; auth: one-time Google sign-in; "
+                          "link: print where it is")
+    sub.set_defaults(func=cmd_tracker)
 
     # harvey outbox
     sub = subparsers.add_parser("outbox", help="Review/approve queued emails")

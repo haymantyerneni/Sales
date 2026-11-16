@@ -57,13 +57,25 @@ def _load_token() -> dict | None:
     return None
 
 
-def _save_token(data: dict):
-    TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-    TOKEN_FILE.write_text(json.dumps(data, indent=2))
+def _save_token(data: dict, token_file=None):
+    token_file = token_file or TOKEN_FILE
+    token_file.parent.mkdir(parents=True, exist_ok=True)
+    token_file.write_text(json.dumps(data, indent=2))
     try:
-        TOKEN_FILE.chmod(0o600)
+        token_file.chmod(0o600)
     except OSError:
         pass
+
+
+def _id_token_email(id_token: str) -> str:
+    """The signed-in account's email from an id_token received directly
+    from Google's token endpoint over TLS (so its payload is trusted as-is)."""
+    try:
+        payload = id_token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return (json.loads(base64.urlsafe_b64decode(payload)).get("email") or "").lower()
+    except (IndexError, ValueError, AttributeError):
+        return ""
 
 
 class GmailProvider(MailProvider):
@@ -258,9 +270,14 @@ class GmailProvider(MailProvider):
         return False, "Token refresh or profile fetch failed"
 
 
-def run_auth_flow(client_id: str, client_secret: str) -> bool:
+def run_auth_flow(client_id: str, client_secret: str, scope: str = SCOPE,
+                  token_file=None, login_hint: str = "", label: str = "Gmail") -> bool:
     """One-time OAuth (installed-app loopback). Blocks until the browser
-    round-trip completes; stores the refresh token for GmailProvider."""
+    round-trip completes; stores the refresh token (GmailProvider by
+    default; the lead tracker passes its own scope and token file).
+
+    With `login_hint`, the account that signed in must be that account
+    (checked via the id_token when the scope includes "openid email")."""
     import http.server
     import secrets
     import threading
@@ -277,10 +294,11 @@ def run_auth_flow(client_id: str, client_secret: str) -> bool:
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
-        "scope": SCOPE,
+        "scope": scope,
         "access_type": "offline",
         "prompt": "consent",
         "state": state,
+        **({"login_hint": login_hint} if login_hint else {}),
     })
 
     result: dict = {}
@@ -343,10 +361,17 @@ def run_auth_flow(client_id: str, client_secret: str) -> bool:
         print("  Google returned no refresh token. Remove Harvey from your"
               " account's third-party access list and retry.")
         return False
+    account = _id_token_email(data.get("id_token", ""))
+    if login_hint and account and account != login_hint.lower():
+        print(f"  ✗ Signed in as {account}, but {login_hint} is the configured account. "
+              "Run it again and pick the right account.")
+        return False
     _save_token({
         "refresh_token": data["refresh_token"],
-        "scope": data.get("scope", SCOPE),
+        "scope": data.get("scope", scope),
+        "account": account or login_hint.lower(),
         "obtained_at": int(time.time()),
-    })
-    print(f"  ✓ Gmail authorized. Token stored at {TOKEN_FILE}")
+    }, token_file)
+    print(f"  ✓ {label} authorized{' as ' + account if account else ''}. "
+          f"Token stored at {token_file or TOKEN_FILE}")
     return True

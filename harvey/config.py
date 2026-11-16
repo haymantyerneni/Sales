@@ -261,6 +261,27 @@ class BrainConfig(BaseModel):
         return v
 
 
+class TrackerConfig(BaseModel):
+    """The lead tracker: one row per person, written (never read) by Harvey
+    at the end of every heartbeat cycle and by `harvey tracker sync`."""
+    enabled: bool = False
+    backend: str = "google_sheets"           # google_sheets | excel
+    # The Google account whose Drive holds the sheet. Changing it (e.g. to
+    # the company Workspace account) needs `harvey tracker auth` once; the
+    # next sync then creates the sheet in that account's Drive.
+    account: str = ""
+    sheet_name: str = "Lead Tracker"
+    excel_path: str = "data/lead_tracker.xlsx"
+
+    @field_validator("backend")
+    @classmethod
+    def _valid_backend(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v not in ("google_sheets", "excel"):
+            raise ValueError("tracker.backend must be 'google_sheets' or 'excel'")
+        return v
+
+
 class HarveyConfig(BaseModel):
     persona: PersonaConfig
     product: ProductConfig
@@ -268,6 +289,7 @@ class HarveyConfig(BaseModel):
     channels: ChannelsConfig = ChannelsConfig()
     usage: UsageConfig = UsageConfig()
     brain: BrainConfig = BrainConfig()
+    tracker: TrackerConfig = TrackerConfig()
 
 
 class EnvConfig(BaseModel):

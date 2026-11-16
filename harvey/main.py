@@ -326,7 +326,12 @@ async def heartbeat(stop_event: asyncio.Event | None = None):
 
             consecutive_errors = 0
 
-            # 7. Sleep until next heartbeat
+            # 7. Lead tracker: rewrite the sheet from the database (write-only;
+            # never fails or stalls the cycle).
+            from harvey.tracker import sync_tracker_safely
+            await sync_tracker_safely(config, env, state.db_path)
+
+            # 8. Sleep until next heartbeat
             logger.info(
                 f"Cycle complete. Sleeping for {config.usage.heartbeat_interval_minutes} minutes."
             )
