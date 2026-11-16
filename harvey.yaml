@@ -7,6 +7,8 @@ persona:
   tone: "professional, consultative, confident"
   from_name: ""                # display name on outgoing mail; empty = name
   signature: ""                # plain-text signature appended to every email after "Warm regards,"
+  logo_url: ""                 # https URL of a small logo under the signature (HTML part); "" = plain text only
+  logo_width: 150              # px, max 150
 
 product:
   name: "Your Product"
@@ -39,6 +41,9 @@ icp:
     - "Head of Growth"
     - "CMO"
     - "Director of Marketing"
+  # Written to only when a company has nobody with one of the titles above
+  # (e.g. titles: CTO..., fallback_titles: CEO, Founder). Noted on the prospect.
+  fallback_titles: []
   geography:
     - "United States"
   # ISO country code ("IN", "US", ...). Search-based discovery (Serper,

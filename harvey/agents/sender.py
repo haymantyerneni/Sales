@@ -18,10 +18,10 @@ from datetime import date, datetime, timedelta, timezone
 
 from harvey.brain import Brain
 from harvey.config import HarveyConfig, EnvConfig
-from harvey.gate import pre_send_check
+from harvey.gate import html_part_problems, pre_send_check
 from harvey.integrations.instantly import InstantlyClient
 from harvey.integrations.mail_provider import NATIVE_PROVIDERS, get_mail_provider
-from harvey.signature import apply_signature, placeholders
+from harvey.signature import apply_signature, html_alternative, placeholders
 from harvey.state import StateManager
 
 logger = logging.getLogger("harvey.sender")
@@ -611,10 +611,23 @@ class Sender:
                 )
                 continue
 
+            # The only HTML that ever leaves: the signature template (logo)
+            # built in code from the gated plain text, then checked again.
+            html_part = html_alternative(item["body"], self.config.persona)
+            html_issues = html_part_problems(html_part, item["body"], self.config.persona)
+            if html_issues:
+                await self.state.update_outbox_item(
+                    item["id"], status="failed",
+                    error="gate: " + "; ".join(html_issues)[:300],
+                )
+                logger.warning(f"Sender: HTML part blocked for {item['to_email']}: {html_issues}")
+                continue
+
             result = await self.provider.send_email(
                 item["to_email"], item["subject"], item["body"],
                 thread_ref=item.get("thread_ref", ""),
                 in_reply_to=item.get("in_reply_to", ""),
+                **({"html": html_part} if html_part else {}),
             )
             if not result.ok:
                 await self.state.update_outbox_item(

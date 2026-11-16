@@ -6,14 +6,15 @@ and buying signals — instead of one merge-tag template shared by a whole
 batch. Steps 2-3 are campaign-level follow-ups sent as replies in email 1's
 thread (the sender threads them).
 
-House style (CloudBox99): warm Indian business tone; email 1 introduces the
-sender and carries the full services list, ordered so the service that fits
-the prospect's segment comes first; follow-up 1 (day 4) suggests one easy
-starting point and a 15-minute call; follow-up 2 (day 10) is a polite last
-note. Segment detection and the services list are deterministic code, and
-every draft is checked against the style rules before it is queued — a
-draft that breaks them is regenerated with the problems spelled out.
-Every queued email still passes the deterministic pre-send gate.
+House style (CloudBox99, written for CTOs): crisp and direct. Email 1
+(under 70 words) says who the sender is, one real detail about the company
+(or none), one services sentence with the segment's most relevant service
+first, and asks for a 15-minute call. Follow-up 1 (day 4) is under 40
+words, follow-up 2 (day 10) under 25. Segment detection and the services
+sentence are deterministic code, and every draft is checked against the
+style rules before it is queued; a draft that breaks them is regenerated
+with the problems spelled out. Every queued email still passes the
+deterministic pre-send gate.
 """
 
 import logging
@@ -25,6 +26,7 @@ from harvey.config import HarveyConfig
 from harvey.gate import BANNED_PHRASES, URL_RE
 from harvey.integrations.mail_provider import NATIVE_PROVIDERS
 from harvey.models.campaign import Campaign, EmailStep
+from harvey.models.prospect import TARGETING_PREFIX
 from harvey.signature import apply_signature, placeholders, strip_signature
 from harvey.state import StateManager
 
@@ -41,18 +43,17 @@ MAX_ATTEMPTS = 3
 # Follow-up cadence: day 4 and day 10 after email 1 actually goes out.
 SEQUENCE_DELAYS = (0, 4, 6)
 
-FIRST_EMAIL_WORDS = (120, 170)
-FOLLOWUP_MAX_WORDS = {2: 80, 3: 50}     # "under N words"
+FIRST_EMAIL_MAX_WORDS = 70               # "under N words", from "Hi" to the question
+FOLLOWUP_MAX_WORDS = {2: 40, 3: 25}
 
 # ── Services and segments ─────────────────────────────────────────────
 
+# The phrases of email 1's services sentence. Order is per segment.
 SERVICES = {
-    "vps": "VPS hosting (from ₹999/month) and dedicated servers",
-    "migration": "Cloud migration from AWS, Azure or on-premise, handled end to end by our engineers",
-    "storage": "Cloud storage and backup",
-    "eyecloud": "EyeCloud: encrypted cloud storage for CCTV footage",
-    "managed": "Managed IT, cybersecurity and 24x7 SOC monitoring",
-    "microsoft": "Microsoft licensing",
+    "vps": "VPS and dedicated servers from ₹999/month",
+    "migration": "cloud migration",
+    "storage": "storage and backup",
+    "managed": "24x7 SOC and managed IT",
 }
 
 # Checked in order: the first segment whose keyword appears wins. Specific
@@ -63,14 +64,14 @@ SEGMENTS = (
         "keywords": ("bank", "nbfc", "financ", "fintech", "insurance", "lending",
                      "microfinance", "wealth", "broking", "capital"),
         "lead": ("managed", "storage"),
-        "angle": "SOC monitoring and cybersecurity, plus storage that keeps data in India",
+        "angle": "24x7 SOC and managed IT, plus storage that keeps data in India",
         "start": "a security review with SOC monitoring, or moving sensitive data to storage that stays in India",
     },
     {
         "key": "health", "label": "Clinics / hospitals / diagnostic centres",
         "keywords": ("clinic", "hospital", "diagnost", "health", "medical", "dental",
                      "pathology", "patholab", "imaging", "nursing", "pharma"),
-        "lead": ("storage", "eyecloud"),
+        "lead": ("storage", "managed"),
         "angle": "secure backup for patient data, plus EyeCloud for CCTV footage",
         "start": "setting up proper encrypted backups for patient data, or moving CCTV footage to the cloud",
     },
@@ -86,9 +87,9 @@ SEGMENTS = (
         "key": "mfg_retail", "label": "Manufacturing / retail chains / multi-site premises",
         "keywords": ("manufactur", "factory", "industrial", "industries", "retail", "cowork",
                      "supermarket", "showroom", "warehouse", "textile", "pharma manufact"),
-        "lead": ("eyecloud", "managed"),
-        "angle": "EyeCloud for multi-site CCTV, plus backup and managed IT",
-        "start": "moving CCTV footage from local recorders at each site to the cloud",
+        "lead": ("storage", "managed"),
+        "angle": "storage and backup across sites, plus managed IT",
+        "start": "one backup setup covering every site",
     },
     {
         "key": "it", "label": "IT services / software / SaaS",
@@ -97,7 +98,7 @@ SEGMENTS = (
                      "startup", "cloud", "it company", "infotech", "systems"),
         "lead": ("vps", "migration"),
         "angle": "VPS and dedicated servers, often moving off AWS/Azure to cut cost",
-        "start": "moving a few servers off AWS or Azure",
+        "start": "moving one workload off AWS or Azure to compare cost",
     },
 )
 DEFAULT_SEGMENT = {
@@ -121,10 +122,17 @@ def segment_for(*texts: str) -> dict:
 
 
 def services_for(segment: dict) -> list[str]:
-    """All services, the segment's most relevant ones first."""
+    """The services phrases, the segment's most relevant ones first."""
     lead = [k for k in segment.get("lead", ()) if k in SERVICES]
     rest = [k for k in SERVICES if k not in lead]
     return [SERVICES[k] for k in lead + rest]
+
+
+def services_sentence(services: list[str]) -> str:
+    """'A, B, C, and D'."""
+    if len(services) < 2:
+        return "".join(services)
+    return ", ".join(services[:-1]) + ", and " + services[-1]
 
 
 # ── Style checks (deterministic; the model's output is never trusted) ──
@@ -159,39 +167,40 @@ def _common_problems(core: str) -> list[str]:
     return problems
 
 
-def first_email_problems(body: str, first_name: str, services: list[str],
-                         good_morning: bool) -> list[str]:
+FILLER_RE = re.compile(
+    r"\bhope (you|your|this|all)\b|\bjust (checking|following|circling)\b|touch base|"
+    r"circle back|good morning|reach(ing)? out", re.IGNORECASE)
+
+
+def first_email_problems(body: str, first_name: str, services: list[str]) -> list[str]:
     """Everything wrong with an email 1 draft ([] = it may be queued)."""
     core = strip_signature(body)
     problems = _common_problems(core)
     if first_name and not core.startswith(f"Hi {first_name},"):
         problems.append(f'must open with "Hi {first_name}," on its own line')
-    opening = core[:120]
-    if good_morning and "Good morning." not in opening:
-        problems.append('first paragraph must begin with "Good morning."')
-    if not good_morning and "good morning" in core.lower():
-        problems.append('do not write "Good morning" (sends are not limited to the morning)')
-    if "Hyderabad" not in core:
-        problems.append("must say CloudBox99 is a cloud infrastructure company based in Hyderabad")
-    lines = [ln.strip() for ln in core.splitlines()]
-    positions = []
-    for svc in services:
-        target = f"- {svc}"
-        positions.append(lines.index(target) if target in lines else -1)
+    filler = FILLER_RE.search(core)
+    if filler:
+        problems.append(f'contains filler ("{filler.group(0)}"); be direct')
+    if "CloudBox99" not in core or "Hyderabad" not in core:
+        problems.append("must say the sender is from CloudBox99, a Hyderabad-based cloud provider")
+    lowered = core.lower()
+    positions = [lowered.find(svc.lower()) for svc in services]
     missing = [svc for svc, pos in zip(services, positions) if pos < 0]
     if missing:
-        problems.append(f"services list must contain these lines exactly: {missing}")
+        problems.append(f"the services sentence must contain these phrases exactly: {missing}")
     elif positions != sorted(positions):
-        problems.append("services list must be in exactly the given order")
-    extra = [ln for ln in lines if LIST_LINE_RE.match(ln) and ln[2:] not in services]
-    if extra:
-        problems.append(f"only the given services may appear as list lines (extra: {extra[:2]})")
+        problems.append(f"services must appear in exactly this order: {services}")
+    if "rupees" not in lowered or "local support" not in lowered:
+        problems.append("must say it is billed in rupees, with local support")
+    if not re.search(r"15[- ]minute", core):
+        problems.append("must ask for a 15-minute call")
+    if LIST_LINE_RE.search(core):
+        problems.append("no lists in email 1; the services go in one sentence")
     if URL_RE.search(core) or re.search(r"\bwww\.", core):
         problems.append("no links in email 1")
     words = len(core.split())
-    lo, hi = FIRST_EMAIL_WORDS
-    if not lo <= words <= hi:
-        problems.append(f"must be {lo}-{hi} words before the sign-off (it is {words})")
+    if words >= FIRST_EMAIL_MAX_WORDS:
+        problems.append(f"must be under {FIRST_EMAIL_MAX_WORDS} words before the sign-off (it is {words})")
     return problems
 
 
@@ -201,8 +210,11 @@ def followup_problems(body: str, step: int) -> list[str]:
     problems = _common_problems(core)
     if not core.startswith("Hi {{first_name}},"):
         problems.append('must open with "Hi {{first_name}}," on its own line')
-    if LIST_LINE_RE.search(core):
-        problems.append("follow-ups must not contain a list (never repeat the services list)")
+    filler = FILLER_RE.search(core)
+    if filler:
+        problems.append(f'contains filler ("{filler.group(0)}"); be direct')
+    if LIST_LINE_RE.search(core) or "₹999" in core:
+        problems.append("follow-ups must not repeat the services")
     if len(URL_RE.findall(core)) > 1:
         problems.append("at most one link in a follow-up")
     limit = FOLLOWUP_MAX_WORDS.get(step)
@@ -229,14 +241,6 @@ class Writer:
     @property
     def is_native(self) -> bool:
         return self.config.channels.email.provider in NATIVE_PROVIDERS
-
-    @property
-    def good_morning(self) -> bool:
-        """'Good morning.' only when sends are confined to the morning."""
-        email_cfg = self.config.channels.email
-        start = getattr(email_cfg, "send_window_start", "") or ""
-        end = getattr(email_cfg, "send_window_end", "") or ""
-        return bool(start and end and end <= "12:00")
 
     @property
     def sender_first_name(self) -> str:
@@ -394,13 +398,20 @@ class Writer:
         return prompt
 
     def _intro_instructions(self) -> str:
-        sender = self.sender_first_name
-        company = self.config.persona.company
-        opener = '"Good morning." followed by ' if self.good_morning else ""
         return (
-            f"- First paragraph: {opener}introduce yourself as {sender} from the "
-            f"{company} sales team, {company} being a cloud infrastructure company "
-            f"based in Hyderabad."
+            f'- "I\'m {self.sender_first_name} from {self.config.persona.company}, a '
+            f'Hyderabad-based cloud provider." (or a close variant naming both).'
+        )
+
+    @staticmethod
+    def _services_instructions(services: list[str]) -> str:
+        line = services_sentence(services)
+        return (
+            "- ONE services sentence containing these phrases word for word, in\n"
+            f"  exactly this order: {line}\n"
+            '  For example: "We help tech teams cut hosting costs and simplify IT: '
+            f'{line}. Everything is billed in rupees, with local support."\n'
+            "  It must say it is billed in rupees, with local support."
         )
 
     async def _write_personal_email(self, prospect) -> dict | None:
@@ -432,8 +443,12 @@ class Writer:
                 facts.append(
                     f"- Signal ({signal.get('type', 'signal')}): {signal.get('detail', '')}"
                 )
-        if prospect.personalization_notes:
-            facts.append(f"- Research notes: {prospect.personalization_notes}")
+        # The "Targeting:" line is bookkeeping (fallback contact), not a fact.
+        notes = "\n".join(
+            ln for ln in (prospect.personalization_notes or "").splitlines()
+            if ln.strip() and not ln.strip().startswith(TARGETING_PREFIX))
+        if notes:
+            facts.append(f"- Research notes: {notes}")
 
         segment = segment_for(prospect.industry,
                               getattr(company, "industry", "") if company else "",
@@ -451,28 +466,30 @@ come from these facts. If a fact isn't listed, you don't know it:
 
 SEGMENT: {segment['label']} (most relevant to them: {segment['angle']}).
 
-Write it in this order:
+Write it in this order, crisp and direct, for a {prospect.title or 'technology head'}:
 - "Hi {first or '{{first_name}}'}," on its own line.
 {self._intro_instructions()}
-  Then ONE sentence about {prospect.company} taken from the FACTS above (what
-  they do, their market or city). If the facts hold nothing specific, say
-  plainly how you came across them and nothing more. Never invent details.
-- A short paragraph: you help growing businesses across India keep their
-  servers, data and IT running smoothly, with local support and billing in
-  rupees, leading into the list.
-- This list, one item per line, each line starting with "- ", copied EXACTLY
-  and in EXACTLY this order:
-{chr(10).join('- ' + s for s in services)}
-- Offer a short 15-minute call to understand their current setup and suggest
-  what fits.
-- Exactly ONE question in the whole email (the only "?"), e.g. whether some
-  time this week would work.
+  In the same paragraph, ONE short sentence with a real detail about
+  {prospect.company} taken from the FACTS above. If the facts hold nothing
+  specific, leave this sentence out. Never invent details.
+{self._services_instructions(services)}
+- End with ONE short question asking for a 15-minute call (the only "?"),
+  e.g. "Open to a 15-minute call this week?"
 - The last line is "Warm regards," with nothing after it.
 
-Length: {FIRST_EMAIL_WORDS[0]}-{FIRST_EMAIL_WORDS[1]} words from "Hi" to the question. Count them.
-Subject: 4-9 words naming {prospect.company} and the area that fits them, in the
-style of "Cloud hosting & IT support for Acme Tech". No "Re:", no "quick question".
-Write the actual text (no merge variables). Do not copy example sentences verbatim.
+Length: UNDER {FIRST_EMAIL_MAX_WORDS} words from "Hi" to the question. Count them.
+
+Reference (style only; the bracket stands for the real detail, never copy it):
+Hi Ravi,
+
+I'm Haymant from CloudBox99, a Hyderabad-based cloud provider. [real detail]
+
+We help tech teams cut hosting costs and simplify IT: VPS and dedicated servers from ₹999/month, cloud migration, storage and backup, and 24x7 SOC and managed IT. Everything is billed in rupees, with local support.
+
+Open to a 15-minute call this week?
+
+Subject: 3-8 words naming {prospect.company}, e.g. "Hosting and IT for Acme Tech".
+No "Re:", no "quick question". Write the actual text (no merge variables).
 
 Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
 
@@ -498,7 +515,7 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
             if not subject or not body:
                 continue
             draft = {"subject": subject[:120], "body": body[:3000]}
-            problems = first_email_problems(body, first, services, self.good_morning)
+            problems = first_email_problems(body, first, services)
             problems += [f"subject: {p}" for p in _subject_problems(subject)]
             if not problems:
                 return draft
@@ -530,31 +547,24 @@ Use the merge variables {{{{first_name}}}} and {{{{company}}}}.
 EMAIL 1 (day 0), a fallback used only when a personal draft is unavailable:
 - "Hi {{{{first_name}}}}," on its own line.
 {self._intro_instructions()}
-  Then one sentence saying you came across {{{{company}}}} and thought you could
-  be useful to their team (no invented details).
-- A short paragraph: you help growing businesses across India keep servers,
-  data and IT running smoothly, with local support and billing in rupees.
-- This list, copied EXACTLY, one per line, each starting with "- ", in EXACTLY this order:
-{chr(10).join('- ' + s for s in services)}
-- Offer a 15-minute call; exactly ONE question; last line "Warm regards,".
-- {FIRST_EMAIL_WORDS[0]}-{FIRST_EMAIL_WORDS[1]} words before the sign-off.
+  No detail about the company (none is known for the fallback).
+{self._services_instructions(services)}
+- One short question asking for a 15-minute call; last line "Warm regards,".
+- Under {FIRST_EMAIL_MAX_WORDS} words before the sign-off.
 
 FOLLOW-UP 1 (day 4, sent as a reply in the same thread):
-- "Hi {{{{first_name}}}}," then a short warm line (e.g. hoping their week is going
-  well) and ask whether they had a chance to see your earlier email.
-- Suggest ONE easy starting point for this segment: {segment['start']},
-  building from there, and offer to suggest a starting point for {{{{company}}}}.
-- Offer a 15-minute call; exactly ONE question. Do NOT repeat the services list.
+- "Hi {{{{first_name}}}}," then, directly: one easy starting point for this
+  segment ({segment['start']}), and one short question asking for a 15-minute call.
+- No filler, no "hope your week", do not repeat the services.
 - Under {FOLLOWUP_MAX_WORDS[2]} words before the sign-off. Last line "Warm regards,".
 
 FOLLOW-UP 2 (day 10, same thread):
-- "Hi {{{{first_name}}}}," then say you don't want to crowd their inbox, so this
-  is your last note for now; invite them to reply any time if this comes up at
-  {{{{company}}}} later.
-- Ask once whether you may check back in a few months (the only question).
+- "Hi {{{{first_name}}}}," then: last note from you; if this comes up at
+  {{{{company}}}} later, they can reply here. One short question asking whether
+  you may check back in a few months.
 - Under {FOLLOWUP_MAX_WORDS[3]} words before the sign-off. Last line "Warm regards,".
 
-Subjects: email 1 in the style of "Cloud hosting & IT support for {{{{company}}}}".
+Subjects: email 1 in the style of "Hosting and IT for {{{{company}}}}".
 Follow-up subjects are replaced by "Re: <email 1 subject>" when sent; write
 "Re: " plus email 1's subject for them.
 
@@ -606,7 +616,7 @@ Return ONLY a JSON array (no markdown fences, no commentary):
         if len(steps) != 3:
             return [f"must be exactly 3 emails (got {len(steps)})"]
         problems = [f"email 1: {p}" for p in first_email_problems(
-            steps[0].body, "{{first_name}}", services, self.good_morning)]
+            steps[0].body, "{{first_name}}", services)]
         for s in steps[1:]:
             problems += [f"follow-up {s.step - 1}: {p}" for p in followup_problems(s.body, s.step)]
         return problems
@@ -670,6 +680,6 @@ def _subject_problems(subject: str) -> list[str]:
         problems.append("uses a banned spam word")
     if "quick question" in subject.lower():
         problems.append('must not say "quick question"')
-    if not 3 <= len(subject.split()) <= 10:
-        problems.append("should be 4-9 words")
+    if not 3 <= len(subject.split()) <= 8:
+        problems.append("should be 3-8 words")
     return problems

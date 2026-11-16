@@ -43,7 +43,7 @@ class FakeProvider(MailProvider):
     def is_configured(self):
         return True
 
-    async def send_email(self, to_email, subject, body, thread_ref="", in_reply_to=""):
+    async def send_email(self, to_email, subject, body, thread_ref="", in_reply_to="", html=""):
         if self.fail_next:
             self.fail_next = False
             return SendResult(ok=False, error="smtp boom")

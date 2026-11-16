@@ -40,7 +40,7 @@ from harvey.config import HarveyConfig, EnvConfig
 from harvey.integrations.email_finder import find_email
 from harvey.integrations.linkedin import LinkedInAutomation
 from harvey.models.company import Company
-from harvey.models.prospect import Prospect
+from harvey.models.prospect import TARGETING_PREFIX, Prospect
 from harvey.state import StateManager
 
 logger = logging.getLogger("harvey.scout")
@@ -524,12 +524,10 @@ class Scout:
             except Exception as e:
                 logger.debug(f"mark_prospects_checked failed for {domain}: {e}")
 
-            for person in people or []:
-                if not isinstance(person, dict):
-                    continue
+            people = [p for p in (people or []) if isinstance(p, dict)]
+            keep, fallback = self._pick_targets([p.get("position") or "" for p in people])
+            for person in [people[i] for i in keep]:
                 title = person.get("position") or ""
-                if not self._title_matches_icp(title):
-                    continue
 
                 verification = person.get("verification") or {}
                 hunter_status = (verification.get("status") or "").lower()
@@ -549,6 +547,9 @@ class Scout:
                     industry=company.get("industry") or default_industry,
                     source="hunter_domain_search",
                     source_url=f"https://{domain}",
+                    personalization_notes=(self._fallback_note(
+                        company.get("name") or self._domain_to_name(domain), title)
+                        if fallback else ""),
                 )
 
                 if not prospect.is_valid():
@@ -1409,10 +1410,9 @@ Respond ONLY with the JSON array."""
             return []
 
         contacts: list[Prospect] = []
-        for member in team_members:
+        keep, fallback = self._pick_targets([m.get("title", "") for m in team_members])
+        for member in [team_members[i] for i in keep]:
             title = member.get("title", "")
-            if not self._title_matches_icp(title):
-                continue
 
             first_name = member.get("first_name", "")
             last_name = member.get("last_name", "")
@@ -1436,7 +1436,10 @@ Respond ONLY with the JSON array."""
                 industry=industry,
                 source=source,
                 source_url=f"https://{domain}",
-                personalization_notes=signal_note,
+                personalization_notes="\n".join(filter(None, [
+                    signal_note,
+                    self._fallback_note(company_name, title) if fallback else "",
+                ])),
             )
 
             if not prospect.is_valid():
@@ -1811,19 +1814,45 @@ Respond ONLY with the JSON array."""
         name = domain.split(".")[0]
         return name.replace("-", " ").title()
 
-    def _title_matches_icp(self, title: str) -> bool:
-        """Check if a job title matches the ICP target titles."""
+    @staticmethod
+    def _title_has(title_lower: str, target: str) -> bool:
+        """Whole-word match, so "CTO" never matches inside "Director"."""
+        t = target.lower().strip()
+        return bool(t) and re.search(rf"(?<![a-z]){re.escape(t)}(?![a-z])", title_lower) is not None
+
+    def _title_tier(self, title: str) -> str:
+        """'primary' (icp.titles), 'fallback' (icp.fallback_titles) or ''."""
         if not title:
-            return False
+            return ""
         title_lower = title.lower()
-        if self.config.icp.titles:
-            for target in self.config.icp.titles:
-                t = target.lower().strip()
-                if t and t in title_lower:
-                    return True
-            return False
-        # No explicit ICP titles → fall back to any senior title.
-        return any(kw in title_lower for kw in _SENIOR_KEYWORDS)
+        icp = self.config.icp
+        if not icp.titles and not icp.fallback_titles:
+            # No explicit ICP titles → any senior title.
+            return "primary" if any(kw in title_lower for kw in _SENIOR_KEYWORDS) else ""
+        if any(self._title_has(title_lower, t) for t in icp.titles):
+            return "primary"
+        if any(self._title_has(title_lower, t) for t in getattr(icp, "fallback_titles", []) or []):
+            return "fallback"
+        return ""
+
+    def _title_matches_icp(self, title: str) -> bool:
+        """Check if a job title matches the ICP target or fallback titles."""
+        return bool(self._title_tier(title))
+
+    def _pick_targets(self, titles: list[str]) -> tuple[list[int], bool]:
+        """Indexes of the people to contact at ONE company: everyone with a
+        primary title (CTO, Head of Technology...); only when there is none,
+        the fallback titles (CEO, Founder...). Returns (indexes, is_fallback)."""
+        tiers = [self._title_tier(t) for t in titles]
+        primary = [i for i, t in enumerate(tiers) if t == "primary"]
+        if primary:
+            return primary, False
+        return [i for i, t in enumerate(tiers) if t == "fallback"], True
+
+    def _fallback_note(self, company_name: str, title: str) -> str:
+        wanted = ", ".join(self.config.icp.titles[:4]) or "technology head"
+        return (f"{TARGETING_PREFIX} fallback contact. No {wanted} found at "
+                f"{company_name}, so this goes to the {title}.")
 
     def _infer_seniority(self, title: str) -> str:
         """Infer seniority level from a job title."""

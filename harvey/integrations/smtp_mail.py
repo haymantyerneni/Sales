@@ -59,6 +59,7 @@ class SmtpImapProvider(MailProvider):
         body: str,
         thread_ref: str = "",
         in_reply_to: str = "",
+        html: str = "",
     ) -> SendResult:
         persona = self.config.persona
         msg = EmailMessage()
@@ -71,6 +72,10 @@ class SmtpImapProvider(MailProvider):
             msg["In-Reply-To"] = in_reply_to
             msg["References"] = in_reply_to
         msg.set_content(body)
+        if html:
+            # multipart/alternative: clients that block images or HTML
+            # show the plain-text part, which is the complete email.
+            msg.add_alternative(html, subtype="html")
 
         try:
             await aiosmtplib.send(

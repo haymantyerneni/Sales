@@ -10,6 +10,12 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+# Prefix of the personalization-notes line recording that this person is a
+# fallback target (no CTO-level contact at the company). Bookkeeping only:
+# the Writer never shows it to the model.
+TARGETING_PREFIX = "Targeting:"
+
+
 class Prospect(BaseModel):
     id: str = ""
     company_id: str = ""       # FK to companies table

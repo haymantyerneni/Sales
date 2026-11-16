@@ -100,8 +100,55 @@ def pre_send_check(
     if len(links) > MAX_LINKS:
         reasons.append(f"too many links ({len(links)} > {MAX_LINKS})")
 
-    # No HTML — Harvey sends plain text only
-    if re.search(r"<\s*(html|body|div|table|img|a)\b", body, re.IGNORECASE):
-        reasons.append("HTML markup in body (plain text only)")
+    # No HTML in the text the model wrote. The only HTML that leaves is the
+    # signature template, built in code from this plain text
+    # (html_part_problems below).
+    if re.search(r"<\s*/?\s*(html|head|body|div|span|p|br|table|tr|td|img|a|b|i|u|"
+                 r"strong|em|font|style|script|iframe|form|center|h[1-6])\b",
+                 subject + " " + body, re.IGNORECASE):
+        reasons.append("HTML markup in subject/body (plain text only)")
 
     return GateResult(ok=not reasons, reasons=reasons)
+
+
+# ── The HTML part (signature logo) ─────────────────────────────────────
+
+_TAG_RE = re.compile(r"<\s*(/?)\s*([a-zA-Z][a-zA-Z0-9]*)([^>]*)>")
+_ALLOWED_HTML_TAGS = {"div", "p", "br", "img"}
+
+
+def html_part_problems(html_part: str, plain_body: str, persona) -> list[str]:
+    """Why an HTML part may not be sent ([] = it may).
+
+    HTML is allowed ONLY as the generated alternative of the plain-text
+    body: our own template (escaped text + the configured logo). So the
+    part must equal what the template builds from the plain text right
+    now, byte for byte, and must hold no tag, image, link or URL other
+    than the configured logo. Model-written HTML can never get through:
+    the plain text is HTML-free (pre_send_check) and is escaped here."""
+    from harvey.signature import html_alternative
+
+    if not html_part:
+        return []
+    problems: list[str] = []
+    logo = (getattr(persona, "logo_url", "") or "").strip()
+    if not logo:
+        problems.append("HTML part present but no persona.logo_url is configured")
+    if html_part != html_alternative(plain_body, persona):
+        problems.append("HTML part is not the signature template built from the plain text")
+    tags = _TAG_RE.findall(html_part)
+    bad = sorted({name.lower() for _, name, _ in tags} - _ALLOWED_HTML_TAGS)
+    if bad:
+        problems.append(f"HTML part uses tags outside the template: {bad[:4]}")
+    imgs = [attrs for _, name, attrs in tags if name.lower() == "img"]
+    if len(imgs) != 1:
+        problems.append(f"HTML part must hold exactly one image, the logo (found {len(imgs)})")
+    srcs = re.findall(r"""\b(?:src|href|background|action)\s*=\s*["']?([^"'\s>]+)""",
+                      html_part, re.IGNORECASE)
+    if any(s != logo for s in srcs):
+        problems.append("HTML part references a URL other than the logo")
+    attrs = " ".join(a for _, _, a in tags)
+    if (re.search(r"<\s*(script|style|a|iframe|form)\b", html_part, re.IGNORECASE)
+            or re.search(r"url\s*\(|@import|\bon\w+\s*=", attrs, re.IGNORECASE)):
+        problems.append("HTML part contains scripts, styles, links or CSS URLs")
+    return problems

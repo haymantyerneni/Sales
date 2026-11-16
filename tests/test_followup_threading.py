@@ -40,9 +40,9 @@ class FakeProvider(MailProvider):
     def is_configured(self):
         return True
 
-    async def send_email(self, to_email, subject, body, thread_ref="", in_reply_to=""):
+    async def send_email(self, to_email, subject, body, thread_ref="", in_reply_to="", html=""):
         self.sent.append({"to": to_email, "subject": subject, "body": body,
-                          "thread_ref": thread_ref, "in_reply_to": in_reply_to})
+                          "thread_ref": thread_ref, "in_reply_to": in_reply_to, "html": html})
         n = len(self.sent)
         return SendResult(ok=True, message_id=f"<m{n}@mail.gmail.com>",
                           thread_ref=thread_ref or f"thread-{n}")
@@ -284,54 +284,55 @@ async def test_window_holds_cold_email_but_not_replies(state, monkeypatch):
 
 REFERENCE_EMAIL_1 = """Hi Ravi,
 
-Good morning. I'm Haymant from the sales team at CloudBox99, a cloud infrastructure company based in Hyderabad. I came across Acme Tech's work on logistics software for regional distributors and thought we could be useful to your team.
+I'm Haymant from CloudBox99, a Hyderabad-based cloud provider. Acme Tech builds logistics software for regional distributors.
 
-We help growing businesses across India keep their servers, data and IT running smoothly, with local support and billing in rupees. Here's what we offer:
+We help tech teams cut hosting costs and simplify IT: VPS and dedicated servers from ₹999/month, cloud migration, storage and backup, and 24x7 SOC and managed IT. Everything is billed in rupees, with local support.
 
-- VPS hosting (from ₹999/month) and dedicated servers
-- Cloud migration from AWS, Azure or on-premise, handled end to end by our engineers
-- Cloud storage and backup
-- EyeCloud: encrypted cloud storage for CCTV footage
-- Managed IT, cybersecurity and 24x7 SOC monitoring
-- Microsoft licensing
+Open to a 15-minute call this week?
 
-If any of this would help Acme Tech, I'd be glad to set up a short 15-minute call to understand your current setup and suggest what fits.
+Warm regards,"""
 
-Would sometime this week work for you?
+# The brief's reference with its "[real detail]" left out (no detail found).
+REFERENCE_EMAIL_1_NO_DETAIL = """Hi Ravi,
+
+I'm Haymant from CloudBox99, a Hyderabad-based cloud provider.
+
+We help tech teams cut hosting costs and simplify IT: VPS and dedicated servers from ₹999/month, cloud migration, storage and backup, and 24x7 SOC and managed IT. Everything is billed in rupees, with local support.
+
+Open to a 15-minute call this week?
 
 Warm regards,"""
 
 REFERENCE_FU1 = """Hi {{first_name}},
 
-Hope your week is going well. I wanted to check whether you had a chance to see my earlier email.
+An easy first step for {{company}} is moving one workload off AWS to compare cost.
 
-Often the easiest place to start is one thing, like moving a few servers off AWS or setting up proper backups, and building from there. I'd be happy to suggest a starting point for {{company}} based on your current setup.
-
-Would a 15-minute call on Thursday or Friday work for you?
+Open to a 15-minute call on Thursday or Friday?
 
 Warm regards,"""
 
-# The brief's own follow-up 2 example is 54 words; trimmed here to fit "under 50".
-REFERENCE_FU2_AS_GIVEN_WORDS = 54
 REFERENCE_FU2 = """Hi {{first_name}},
 
-I don't want to crowd your inbox, so this is my last note for now. If hosting, backups or IT support come up at {{company}} later, just reply here and I'll gladly help.
+Last note from me. If hosting comes up at {{company}} later, just reply here.
 
-Would it be all right if I checked back in a few months?
+May I check back in a few months?
 
 Warm regards,"""
 
 
-def test_segments_order_the_services_list():
-    from harvey.agents.writer import SERVICES, segment_for, services_for
+def test_segments_order_the_services():
+    from harvey.agents.writer import SERVICES, segment_for, services_for, services_sentence
     assert segment_for("SaaS startups")["key"] == "it"
     assert segment_for("diagnostic centres")["key"] == "health"
     assert segment_for("NBFCs")["key"] == "finance"
     assert segment_for("retail chains")["key"] == "mfg_retail"
     assert segment_for("D2C brands")["key"] == "ecommerce"
+    it = services_for(segment_for("software companies"))
+    assert services_sentence(it) == ("VPS and dedicated servers from ₹999/month, cloud migration, "
+                                     "storage and backup, and 24x7 SOC and managed IT")
     clinic = services_for(segment_for("clinics"))
-    assert clinic[:2] == [SERVICES["storage"], SERVICES["eyecloud"]]
-    assert sorted(clinic) == sorted(SERVICES.values())        # all six, once each
+    assert clinic[0] == SERVICES["storage"]
+    assert sorted(clinic) == sorted(SERVICES.values())        # all four, once each
     assert services_for(segment_for("banks"))[0] == SERVICES["managed"]
     # Industry outranks the description: a software firm serving manufacturers.
     assert segment_for("software companies",
@@ -342,28 +343,38 @@ def test_segments_order_the_services_list():
 
 def test_reference_drafts_pass_the_style_checks():
     from harvey.agents.writer import (
-        first_email_problems, followup_problems, segment_for, services_for)
+        FIRST_EMAIL_MAX_WORDS, FOLLOWUP_MAX_WORDS, first_email_problems,
+        followup_problems, segment_for, services_for)
+    from harvey.signature import strip_signature
     services = services_for(segment_for("software companies"))
-    assert first_email_problems(REFERENCE_EMAIL_1, "Ravi", services, True) == []
+    assert first_email_problems(REFERENCE_EMAIL_1, "Ravi", services) == []
+    assert first_email_problems(REFERENCE_EMAIL_1_NO_DETAIL, "Ravi", services) == []
     assert followup_problems(REFERENCE_FU1, 2) == []
     assert followup_problems(REFERENCE_FU2, 3) == []
+    assert (FIRST_EMAIL_MAX_WORDS, FOLLOWUP_MAX_WORDS) == (70, {2: 40, 3: 25})
+    assert len(strip_signature(REFERENCE_EMAIL_1).split()) < 70
 
 
 def test_style_checks_catch_violations():
     from harvey.agents.writer import (
         first_email_problems, followup_problems, segment_for, services_for)
     services = services_for(segment_for("software companies"))
-    bad = REFERENCE_EMAIL_1.replace("handled end to end by our engineers", "free migration")
-    assert any("services list" in p or "banned" in p
-               for p in first_email_problems(bad, "Ravi", services, True))
-    wrong_order = services_for(segment_for("clinics"))
-    assert any("order" in p for p in first_email_problems(REFERENCE_EMAIL_1, "Ravi", wrong_order, True))
-    assert any("Good morning" in p for p in first_email_problems(REFERENCE_EMAIL_1, "Ravi", services, False))
-    linked = REFERENCE_EMAIL_1.replace("suggest what fits.", "suggest what fits: https://cloudbox99.com")
-    assert any("links" in p for p in first_email_problems(linked, "Ravi", services, True))
-    listed = REFERENCE_FU1.replace("Often the easiest", "- VPS hosting\n\nOften the easiest")
-    assert any("list" in p for p in followup_problems(listed, 2))
-    two_q = REFERENCE_FU2.replace("my last note for now.", "my last note for now. Busy week?")
+    check = lambda body, svc=services: first_email_problems(body, "Ravi", svc)  # noqa: E731
+    assert any("banned" in p for p in check(REFERENCE_EMAIL_1.replace("cloud migration", "free migration")))
+    assert any("order" in p for p in check(REFERENCE_EMAIL_1, services_for(segment_for("banks"))))
+    assert any("filler" in p for p in check(REFERENCE_EMAIL_1.replace("I'm Haymant", "Good morning. I'm Haymant")))
+    assert any("filler" in p for p in check(REFERENCE_EMAIL_1.replace("I'm Haymant", "Hope you are well. I'm Haymant")))
+    assert any("links" in p for p in check(REFERENCE_EMAIL_1.replace("local support.", "local support: https://cloudbox99.com")))
+    assert any("rupees" in p for p in check(REFERENCE_EMAIL_1.replace("billed in rupees", "billed monthly")))
+    assert any("15-minute" in p for p in check(REFERENCE_EMAIL_1.replace("a 15-minute call", "a call")))
+    long = REFERENCE_EMAIL_1.replace("regional distributors.", "regional distributors " + "across many states " * 3 + ".")
+    assert any("under 70 words" in p for p in check(long))
+    listed = REFERENCE_EMAIL_1.replace("We help", "- We help")
+    assert any("lists" in p for p in check(listed))
+    assert any("filler" in p for p in followup_problems(REFERENCE_FU1.replace("An easy", "Hope your week is going well. An easy"), 2))
+    assert any("repeat the services" in p for p in followup_problems(REFERENCE_FU1.replace("to compare cost", "from ₹999/month"), 2))
+    assert any("under 25" in p for p in followup_problems(REFERENCE_FU2.replace("later,", "later, or backups, or IT support, or migration,"), 3))
+    two_q = REFERENCE_FU2.replace("Last note from me.", "Last note from me. Busy week?")
     assert any("one question" in p for p in followup_problems(two_q, 3))
 
 

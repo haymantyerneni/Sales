@@ -6,6 +6,7 @@ model produced. ``apply_signature`` is idempotent: running it on an already
 signed body returns the same body.
 """
 
+import html
 import re
 from email.utils import formataddr
 
@@ -44,6 +45,40 @@ def strip_signature(body: str) -> str:
     text = (body or "").rstrip()
     matches = list(_SIGN_OFF_RE.finditer(text))
     return text[: matches[-1].start()].rstrip() if matches else text
+
+
+LOGO_MAX_WIDTH = 150
+
+_HTML_OPEN = ('<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;'
+              'line-height:1.5;color:#222222">')
+_P_OPEN = '<p style="margin:0 0 12px 0">'
+
+
+def _logo_tag(persona) -> str:
+    url = (getattr(persona, "logo_url", "") or "").strip()
+    width = min(int(getattr(persona, "logo_width", LOGO_MAX_WIDTH) or LOGO_MAX_WIDTH),
+                LOGO_MAX_WIDTH)
+    alt = html.escape((getattr(persona, "company", "") or "Logo").strip(), quote=True)
+    return (f'<img src="{html.escape(url, quote=True)}" width="{width}" alt="{alt}" '
+            f'style="display:block;border:0;outline:none;width:{width}px;'
+            f'max-width:{width}px;height:auto">')
+
+
+def html_alternative(body: str, persona) -> str:
+    """The HTML part: the plain-text body, HTML-escaped (so nothing the model
+    wrote can become markup), in paragraphs, plus the logo under the
+    signature. '' when no logo is configured: the email stays plain text.
+
+    This template is the ONLY source of HTML in outgoing mail; the gate
+    rebuilds it from the plain text and rejects anything that differs."""
+    if not (getattr(persona, "logo_url", "") or "").strip():
+        return ""
+    paragraphs = [p.strip("\n") for p in re.split(r"\n\s*\n", (body or "").strip())]
+    parts = [
+        _P_OPEN + "<br>".join(html.escape(line, quote=False) for line in p.split("\n")) + "</p>"
+        for p in paragraphs if p.strip()
+    ]
+    return _HTML_OPEN + "".join(parts) + _logo_tag(persona) + "</div>"
 
 
 def placeholders(text: str) -> list[str]:

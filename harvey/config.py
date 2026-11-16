@@ -37,6 +37,22 @@ class PersonaConfig(BaseModel):
     # Plain-text signature appended in code to every outgoing email, after
     # "Warm regards,". Gmail's API never adds the mailbox's own signature.
     signature: str = ""
+    # Public https URL of a small logo shown under the signature in the
+    # HTML part of every email (multipart/alternative; the plain-text part
+    # is unchanged). Empty = plain text only. Use a dark/colour logo on a
+    # transparent or white background, at a URL that never changes.
+    logo_url: str = ""
+    logo_width: int = 150          # px, capped at 150
+
+    @field_validator("logo_url")
+    @classmethod
+    def _https_logo(cls, v: str) -> str:
+        v = (v or "").strip()
+        if v and not v.lower().startswith("https://"):
+            raise ValueError("persona.logo_url must be an https:// URL")
+        if any(c in v for c in "\"'<> "):
+            raise ValueError("persona.logo_url contains characters not allowed in a URL")
+        return v
 
 
 class OfferConfig(BaseModel):
@@ -63,6 +79,10 @@ class ICPConfig(BaseModel):
     company_size: str
     titles: list[str]
     geography: list[str]
+    # Who to write to when a company has nobody with one of `titles`
+    # (e.g. CTO first, then CEO / Founder). Fallback prospects carry a
+    # "Targeting:" line in their notes saying so.
+    fallback_titles: list[str] = []
     # Role keywords that indicate a company is in-market right now (a company
     # hiring a "Head of Growth" is buying growth tooling). Empty → falls back
     # to `titles`. Used for careers-page scanning and job-board discovery.
