@@ -36,8 +36,19 @@ def apply_signature(body: str, persona) -> str:
     matches = list(_SIGN_OFF_RE.finditer(text))
     if matches:
         text = text[: matches[-1].start()].rstrip()
+    # The model's text: one line per paragraph. (The signature block below
+    # keeps its own line breaks.)
+    text = unwrap_paragraphs(text)
     block = signature_block(persona)
     return f"{text}\n\n{SIGN_OFF}\n{block}" if block else f"{text}\n\n{SIGN_OFF}"
+
+
+def unwrap_paragraphs(text: str) -> str:
+    """One line per paragraph: joins line breaks inside a paragraph so the
+    plain-text part never breaks mid-sentence. Blank lines are kept."""
+    paragraphs = re.split(r"\n\s*\n", (text or "").strip())
+    return "\n\n".join(" ".join(ln.strip() for ln in p.splitlines() if ln.strip())
+                         for p in paragraphs if p.strip())
 
 
 def strip_signature(body: str) -> str:

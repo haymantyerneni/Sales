@@ -64,7 +64,8 @@ channels:
     max_bounce_rate: 0.05       # pause all sending if bounces exceed this
     weekdays_only: false        # hold cold emails on Sat/Sun until Monday
     send_window_start: ""       # e.g. "09:30" (quiet_hours timezone): cold emails only
-    send_window_end: ""         # e.g. "12:00"; discovery/writing/replies keep running
+    send_window_end: ""         # e.g. "18:00"; discovery/writing/replies keep running
+    window_exempt: []           # your own test addresses: ignore weekdays_only + window
   linkedin:
     enabled: true
     max_daily_connections: 20

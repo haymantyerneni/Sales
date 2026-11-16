@@ -122,6 +122,14 @@ class EmailChannelConfig(BaseModel):
     # sends are held; discovery, writing and reply handling keep running.
     send_window_start: str = ""
     send_window_end: str = ""
+    # Your own addresses for test sends: exempt from weekdays_only and the
+    # send window (never from the daily cap, approval or the gate).
+    window_exempt: list[str] = []
+
+    @field_validator("window_exempt")
+    @classmethod
+    def _lower_exempt(cls, v: list[str]) -> list[str]:
+        return [e.strip().lower() for e in (v or []) if e and e.strip()]
 
     @field_validator("send_window_start", "send_window_end")
     @classmethod

@@ -100,3 +100,13 @@ def get_mail_provider(config, env) -> MailProvider | None:
         from harvey.integrations.smtp_mail import SmtpImapProvider
         return SmtpImapProvider(config, env)
     return None
+
+
+def plain_text_cte(body: str) -> str:
+    """Transfer encoding for the plain-text part. 8bit keeps every paragraph
+    on one line exactly as written; quoted-printable would cut lines at 76
+    characters with soft breaks, which some mail apps show as hard breaks
+    mid-sentence. Lines over the SMTP limit (998) fall back to base64, which
+    also decodes to the original lines."""
+    longest = max((len(line.encode("utf-8")) for line in (body or "").splitlines()), default=0)
+    return "8bit" if longest <= 900 else "base64"

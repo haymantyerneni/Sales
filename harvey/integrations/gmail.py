@@ -31,6 +31,7 @@ from harvey.integrations.mail_provider import (
     MailProvider,
     SendResult,
     looks_like_bounce,
+    plain_text_cte,
 )
 
 logger = logging.getLogger("harvey.gmail")
@@ -146,7 +147,7 @@ class GmailProvider(MailProvider):
         if in_reply_to:
             msg["In-Reply-To"] = in_reply_to
             msg["References"] = in_reply_to
-        msg.set_content(body)
+        msg.set_content(body, cte=plain_text_cte(body))
         if html:
             # multipart/alternative: clients that block images or HTML
             # show the plain-text part, which is the complete email.

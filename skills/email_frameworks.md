@@ -35,13 +35,16 @@ Style rules are negotiable. These are not:
 ### Email 1 (day 0): under 70 words
 
 1. "Hi {{first_name}}," on its own line.
-2. Who you are: Haymant from CloudBox99, a Hyderabad-based cloud provider.
-3. ONE real detail about their company, from the research notes or their own website. If there is none, leave the sentence out. Never invent one.
-4. ONE services sentence: VPS and dedicated servers from ₹999/month, cloud migration, storage and backup, and 24x7 SOC and managed IT, with the service most relevant to their segment first. Then: billed in rupees, with local support.
+2. Never introduce yourself ("I'm Haymant from CloudBox99"): the From name and the signature already say it.
+3. ONE real detail about their company, from the research notes or their own website. Then ONE short sentence on why that matters to them: what a firm doing that usually needs. A reasonable general inference, never an invented fact about them.
+4. The services sentence, starting exactly "That's what we do at CloudBox99 in Hyderabad:" and naming all five: Microsoft licensing, VPS and dedicated servers from ₹999/month, cloud migration, storage and backup, and 24x7 SOC and managed IT, the most relevant first.
 5. One short question asking for a 15-minute call.
 6. "Warm regards," (the signature is added automatically).
 
+No detail found? Replace step 3 with one sentence on what businesses in their segment usually need, claiming nothing about them. Never mention rupees, INR or billing. Each paragraph is one line.
+
 **Which service goes first:**
+- Works with Microsoft (SharePoint, Office 365, Dynamics, Azure, Microsoft partners): Microsoft licensing, and the subject can say so
 - IT / software / SaaS: VPS and dedicated servers, cloud migration
 - Clinics / hospitals / diagnostic centres: storage and backup
 - Banks / NBFCs / financial services: 24x7 SOC and managed IT
@@ -50,17 +53,18 @@ Style rules are negotiable. These are not:
 
 **Reference (style only; never copy it verbatim):**
 ```
-Hi Ravi,
+Subject: Microsoft licensing & hosting for Saras India
 
-I'm Haymant from CloudBox99, a Hyderabad-based cloud provider. [real detail]
+Hi Haymant,
 
-We help tech teams cut hosting costs and simplify IT: VPS and dedicated servers from ₹999/month, cloud migration, storage and backup, and 24x7 SOC and managed IT. Everything is billed in rupees, with local support.
+I came across Saras India's SharePoint and Office 365 work, both online and on-premises. Firms delivering that for clients usually need reliable servers and a dependable source for Microsoft licences.
 
-Open to a 15-minute call this week?
+That's what we do at CloudBox99 in Hyderabad: Microsoft licensing, VPS and dedicated servers from ₹999/month, cloud migration, storage and backup, and 24x7 SOC and managed IT.
+
+Would a 15-minute call this week make sense?
 
 Warm regards,
 ```
-(The bracketed part stands for a real detail from the facts, or nothing. Never send brackets.)
 
 ### Follow-up 1 (day 4, same thread): under 40 words
 
@@ -96,7 +100,7 @@ A reply from the prospect cancels every remaining follow-up.
 
 ## Subject Lines
 
-- Plain and honest, 3-8 words: "Hosting and IT for Acme Tech", "Hosting costs at Acme Tech".
+- Plain and honest, 3-8 words: "Microsoft licensing & hosting for Saras India" (Microsoft-centred firms), "Hosting and IT for Acme Tech".
 - Naming the prospect's company is fine. No "quick question", no hype, no spam words.
 - Follow-ups reuse email 1's subject as "Re: <subject>" automatically.
 
@@ -115,7 +119,7 @@ Before finalizing any email, ask:
 1. Is it crisp and direct, with no filler?
 2. Is there exactly one question?
 3. Is it within its word limit (email 1: under 70; follow-up 1: under 40; follow-up 2: under 25)?
-4. Does email 1 name all four services in one sentence, in the right order, with rupee billing and local support, and no links?
+4. Does email 1 bridge from the detail to "That's what we do at CloudBox99 in Hyderabad:" with all five services in the right order, no self-introduction, no rupee billing, and no links?
 5. Does it avoid every spam word, filler phrase and AI tell above?
 6. Is every factual claim true and sourced from product_knowledge.md or the prospect's own site?
 7. Does it end with "Warm regards," and nothing after it?

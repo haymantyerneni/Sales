@@ -27,7 +27,8 @@ from harvey.gate import BANNED_PHRASES, URL_RE
 from harvey.integrations.mail_provider import NATIVE_PROVIDERS
 from harvey.models.campaign import Campaign, EmailStep
 from harvey.models.prospect import TARGETING_PREFIX
-from harvey.signature import apply_signature, placeholders, strip_signature
+from harvey.signature import (apply_signature, placeholders, strip_signature,
+                              unwrap_paragraphs)
 from harvey.state import StateManager
 
 logger = logging.getLogger("harvey.writer")
@@ -48,8 +49,11 @@ FOLLOWUP_MAX_WORDS = {2: 40, 3: 25}
 
 # ── Services and segments ─────────────────────────────────────────────
 
-# The phrases of email 1's services sentence. Order is per segment.
+# The phrases of email 1's services sentence, in base order. Per prospect,
+# Microsoft licensing leads for Microsoft-centred companies, then the
+# segment's lead services, then the rest in this order.
 SERVICES = {
+    "microsoft": "Microsoft licensing",
     "vps": "VPS and dedicated servers from ₹999/month",
     "migration": "cloud migration",
     "storage": "storage and backup",
@@ -121,9 +125,23 @@ def segment_for(*texts: str) -> dict:
     return DEFAULT_SEGMENT
 
 
-def services_for(segment: dict) -> list[str]:
-    """The services phrases, the segment's most relevant ones first."""
-    lead = [k for k in segment.get("lead", ()) if k in SERVICES]
+# A company that works with Microsoft (builds on it, resells it, runs on it)
+# hears about Microsoft licensing first.
+MICROSOFT_RE = re.compile(
+    r"\b(microsoft|sharepoint|office ?365|microsoft ?365|m365|o365|dynamics ?(365|crm|nav|ax)?|"
+    r"azure|power ?bi|power ?platform|power ?apps|exchange online|teams|ms ?partner)\b",
+    re.IGNORECASE)
+
+
+def works_with_microsoft(*texts: str) -> bool:
+    return any(MICROSOFT_RE.search(t or "") for t in texts)
+
+
+def services_for(segment: dict, microsoft: bool = False) -> list[str]:
+    """All service phrases, most relevant first: Microsoft licensing for
+    Microsoft-centred companies, then the segment's lead services."""
+    lead = (["microsoft"] if microsoft else []) + [
+        k for k in segment.get("lead", ()) if k in SERVICES and not (microsoft and k == "microsoft")]
     rest = [k for k in SERVICES if k not in lead]
     return [SERVICES[k] for k in lead + rest]
 
@@ -171,8 +189,19 @@ FILLER_RE = re.compile(
     r"\bhope (you|your|this|all)\b|\bjust (checking|following|circling)\b|touch base|"
     r"circle back|good morning|reach(ing)? out", re.IGNORECASE)
 
+# Never mention rupee billing (the ₹999/month price is the only rupee figure).
+RUPEE_BILLING_RE = re.compile(r"\brupees?\b|\binr\b|\bbill(ed|ing)\s+in\b", re.IGNORECASE)
 
-def first_email_problems(body: str, first_name: str, services: list[str]) -> list[str]:
+# Email 1's bridge into the services sentence ("That's what we do at
+# CloudBox99 in Hyderabad: ..."). Straight or curly apostrophe.
+BRIDGE = "That's what we do at CloudBox99 in Hyderabad:"
+BRIDGE_RE = re.compile(r"That['’]s what we do at CloudBox99 in Hyderabad:\s*(.+)")
+
+
+
+
+def first_email_problems(body: str, first_name: str, services: list[str],
+                         sender_first: str = "Haymant") -> list[str]:
     """Everything wrong with an email 1 draft ([] = it may be queued)."""
     core = strip_signature(body)
     problems = _common_problems(core)
@@ -181,17 +210,20 @@ def first_email_problems(body: str, first_name: str, services: list[str]) -> lis
     filler = FILLER_RE.search(core)
     if filler:
         problems.append(f'contains filler ("{filler.group(0)}"); be direct')
-    if "CloudBox99" not in core or "Hyderabad" not in core:
-        problems.append("must say the sender is from CloudBox99, a Hyderabad-based cloud provider")
-    lowered = core.lower()
-    positions = [lowered.find(svc.lower()) for svc in services]
+    if sender_first and re.search(rf"\bI(['’]m| am) {re.escape(sender_first)}\b", core):
+        problems.append(f'do not write "I\'m {sender_first}"; the From name and signature say it')
+    if RUPEE_BILLING_RE.search(core):
+        problems.append("do not mention rupee billing")
+    bridge = BRIDGE_RE.search(core)
+    if not bridge:
+        problems.append(f'the services sentence must start with "{BRIDGE}"')
+    pitch = (bridge.group(1) if bridge else core).lower()
+    positions = [pitch.find(svc.lower()) for svc in services]
     missing = [svc for svc, pos in zip(services, positions) if pos < 0]
     if missing:
         problems.append(f"the services sentence must contain these phrases exactly: {missing}")
     elif positions != sorted(positions):
         problems.append(f"services must appear in exactly this order: {services}")
-    if "rupees" not in lowered or "local support" not in lowered:
-        problems.append("must say it is billed in rupees, with local support")
     if not re.search(r"15[- ]minute", core):
         problems.append("must ask for a 15-minute call")
     if LIST_LINE_RE.search(core):
@@ -215,6 +247,8 @@ def followup_problems(body: str, step: int) -> list[str]:
         problems.append(f'contains filler ("{filler.group(0)}"); be direct')
     if LIST_LINE_RE.search(core) or "₹999" in core:
         problems.append("follow-ups must not repeat the services")
+    if RUPEE_BILLING_RE.search(core):
+        problems.append("do not mention rupee billing")
     if len(URL_RE.findall(core)) > 1:
         problems.append("at most one link in a follow-up")
     limit = FOLLOWUP_MAX_WORDS.get(step)
@@ -397,21 +431,12 @@ class Writer:
         )
         return prompt
 
-    def _intro_instructions(self) -> str:
-        return (
-            f'- "I\'m {self.sender_first_name} from {self.config.persona.company}, a '
-            f'Hyderabad-based cloud provider." (or a close variant naming both).'
-        )
-
     @staticmethod
     def _services_instructions(services: list[str]) -> str:
         line = services_sentence(services)
         return (
-            "- ONE services sentence containing these phrases word for word, in\n"
-            f"  exactly this order: {line}\n"
-            '  For example: "We help tech teams cut hosting costs and simplify IT: '
-            f'{line}. Everything is billed in rupees, with local support."\n'
-            "  It must say it is billed in rupees, with local support."
+            f'- Then, as its own paragraph, exactly: "{BRIDGE} {line}."\n'
+            "  (the services word for word, in exactly this order)."
         )
 
     async def _write_personal_email(self, prospect) -> dict | None:
@@ -453,7 +478,9 @@ class Writer:
         segment = segment_for(prospect.industry,
                               getattr(company, "industry", "") if company else "",
                               description, prospect.company)
-        services = services_for(segment)
+        services = services_for(segment, microsoft=works_with_microsoft(
+            prospect.industry, description, notes,
+            getattr(company, "industry", "") if company else ""))
         first = prospect.first_name or ""
 
         task = f"""
@@ -468,27 +495,38 @@ SEGMENT: {segment['label']} (most relevant to them: {segment['angle']}).
 
 Write it in this order, crisp and direct, for a {prospect.title or 'technology head'}:
 - "Hi {first or '{{first_name}}'}," on its own line.
-{self._intro_instructions()}
-  In the same paragraph, ONE short sentence with a real detail about
-  {prospect.company} taken from the FACTS above. If the facts hold nothing
-  specific, leave this sentence out. Never invent details.
+- Do NOT introduce yourself ("I'm {self.sender_first_name} from ..."): the From
+  name and signature already say who you are.
+- First paragraph, two short sentences: ONE real detail about {prospect.company}
+  from the FACTS above (e.g. "I came across {prospect.company}'s ... work"), then
+  ONE sentence on why that matters to them: what a firm doing that usually
+  needs. A reasonable inference stated generally ("Firms delivering that for
+  clients usually need ..."), never an invented fact about them.
+  If the FACTS hold nothing specific, write instead one sentence on what
+  {segment['label'].lower()} usually need, without claiming anything about them.
 {self._services_instructions(services)}
 - End with ONE short question asking for a 15-minute call (the only "?"),
-  e.g. "Open to a 15-minute call this week?"
+  e.g. "Would a 15-minute call this week make sense?"
 - The last line is "Warm regards," with nothing after it.
+- Each paragraph is ONE line: never break a line inside a paragraph.
+- Never mention rupees or billing.
 
 Length: UNDER {FIRST_EMAIL_MAX_WORDS} words from "Hi" to the question. Count them.
 
-Reference (style only; the bracket stands for the real detail, never copy it):
-Hi Ravi,
+Reference (style only; never copy it):
+Subject: Microsoft licensing & hosting for Saras India
 
-I'm Haymant from CloudBox99, a Hyderabad-based cloud provider. [real detail]
+Hi Haymant,
 
-We help tech teams cut hosting costs and simplify IT: VPS and dedicated servers from ₹999/month, cloud migration, storage and backup, and 24x7 SOC and managed IT. Everything is billed in rupees, with local support.
+I came across Saras India's SharePoint and Office 365 work, both online and on-premises. Firms delivering that for clients usually need reliable servers and a dependable source for Microsoft licences.
 
-Open to a 15-minute call this week?
+That's what we do at CloudBox99 in Hyderabad: Microsoft licensing, VPS and dedicated servers from ₹999/month, cloud migration, storage and backup, and 24x7 SOC and managed IT.
 
-Subject: 3-8 words naming {prospect.company}, e.g. "Hosting and IT for Acme Tech".
+Would a 15-minute call this week make sense?
+
+Subject: 3-8 words naming {prospect.company} and the service that leads
+(e.g. "Microsoft licensing & hosting for Acme Tech" when Microsoft licensing
+comes first, "Hosting and IT for Acme Tech" otherwise).
 No "Re:", no "quick question". Write the actual text (no merge variables).
 
 Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
@@ -514,8 +552,9 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
             body = str(result.get("body") or "").strip()
             if not subject or not body:
                 continue
+            body = unwrap_paragraphs(body)
             draft = {"subject": subject[:120], "body": body[:3000]}
-            problems = first_email_problems(body, first, services)
+            problems = first_email_problems(body, first, services, self.sender_first_name)
             problems += [f"subject: {p}" for p in _subject_problems(subject)]
             if not problems:
                 return draft
@@ -534,7 +573,8 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
             for p in prospects[:5]
         )
         segment = segment_for(*(f"{p.industry} {p.company}" for p in prospects[:5]))
-        services = services_for(segment)
+        services = services_for(segment, microsoft=all(
+            works_with_microsoft(p.industry, p.personalization_notes) for p in prospects[:5]))
 
         task = f"""
 
@@ -545,17 +585,17 @@ SEGMENT: {segment['label']} (most relevant to them: {segment['angle']}).
 Use the merge variables {{{{first_name}}}} and {{{{company}}}}.
 
 EMAIL 1 (day 0), a fallback used only when a personal draft is unavailable:
-- "Hi {{{{first_name}}}}," on its own line.
-{self._intro_instructions()}
-  No detail about the company (none is known for the fallback).
+- "Hi {{{{first_name}}}}," on its own line. Do not introduce yourself.
+- One sentence on what {segment['label'].lower()} usually need (no claims
+  about {{{{company}}}}).
 {self._services_instructions(services)}
 - One short question asking for a 15-minute call; last line "Warm regards,".
-- Under {FIRST_EMAIL_MAX_WORDS} words before the sign-off.
+- Under {FIRST_EMAIL_MAX_WORDS} words before the sign-off. Never mention rupees or billing.
 
 FOLLOW-UP 1 (day 4, sent as a reply in the same thread):
 - "Hi {{{{first_name}}}}," then, directly: one easy starting point for this
   segment ({segment['start']}), and one short question asking for a 15-minute call.
-- No filler, no "hope your week", do not repeat the services.
+- No filler, no "hope your week", do not repeat the services, never mention rupees or billing.
 - Under {FOLLOWUP_MAX_WORDS[2]} words before the sign-off. Last line "Warm regards,".
 
 FOLLOW-UP 2 (day 10, same thread):
@@ -616,7 +656,7 @@ Return ONLY a JSON array (no markdown fences, no commentary):
         if len(steps) != 3:
             return [f"must be exactly 3 emails (got {len(steps)})"]
         problems = [f"email 1: {p}" for p in first_email_problems(
-            steps[0].body, "{{first_name}}", services)]
+            steps[0].body, "{{first_name}}", services, self.sender_first_name)]
         for s in steps[1:]:
             problems += [f"follow-up {s.step - 1}: {p}" for p in followup_problems(s.body, s.step)]
         return problems
@@ -644,7 +684,7 @@ Return ONLY a JSON array (no markdown fences, no commentary):
                 logger.warning(f"Writer: Skipping non-dict step at index {i}.")
                 continue
             subject = str(raw.get("subject") or "").strip()
-            body = str(raw.get("body") or "").strip()
+            body = unwrap_paragraphs(str(raw.get("body") or ""))
             if not subject or not body:
                 logger.warning(f"Writer: Skipping step {i + 1} with empty subject/body.")
                 continue

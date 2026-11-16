@@ -445,6 +445,11 @@ class Sender:
             return ""
         return f"outside the {start}-{end} send window"
 
+    def _window_exempt(self, item: dict) -> bool:
+        """The owner's own test addresses ignore the weekday/window hold."""
+        exempt = getattr(self.config.channels.email, "window_exempt", []) or []
+        return (item.get("to_email") or "").strip().lower() in {e.lower() for e in exempt}
+
     def _is_weekend_hold(self, now: datetime | None = None) -> bool:
         """True on Sat/Sun (local to the quiet-hours timezone) when
         ``channels.email.weekdays_only`` is set."""
@@ -554,7 +559,7 @@ class Sender:
 
             # Weekend / send-window hold: cold sequence emails wait (still
             # approved); replies to people who wrote back are not held.
-            if hold_cold and item["kind"] == "sequence":
+            if hold_cold and item["kind"] == "sequence" and not self._window_exempt(item):
                 continue
 
             prospect = await self.state.get_prospect(item["prospect_id"])

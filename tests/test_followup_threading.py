@@ -54,7 +54,7 @@ class FakeProvider(MailProvider):
         return True, "fake"
 
 
-def make_config(signature=SIG, window=("", ""), weekdays_only=False):
+def make_config(signature=SIG, window=("", ""), weekdays_only=False, exempt=()):
     return NS(
         persona=NS(name="Haymant Yerneni", from_name="Haymant Yerneni | CloudBox99",
                    email="haymant@cb99mail.com", company="CloudBox99", role="Sales Team",
@@ -64,7 +64,8 @@ def make_config(signature=SIG, window=("", ""), weekdays_only=False):
         channels=NS(email=NS(enabled=True, provider="smtp", max_daily_sends=50,
                              send_to_risky=False, require_approval=False,
                              max_bounce_rate=0.05, weekdays_only=weekdays_only,
-                             send_window_start=window[0], send_window_end=window[1]),
+                             send_window_start=window[0], send_window_end=window[1],
+                             window_exempt=list(exempt)),
                     linkedin=NS(enabled=False)),
         usage=NS(quiet_hours=NS(timezone="Asia/Kolkata")),
     )
@@ -280,26 +281,53 @@ async def test_window_holds_cold_email_but_not_replies(state, monkeypatch):
     assert [m["subject"] for m in provider.sent] == ["Re: hi"]
 
 
+def test_real_prospect_window_is_weekdays_0930_to_1800_ist():
+    from datetime import datetime, timezone
+    sender = make_sender(None, FakeProvider(), window=("09:30", "18:00"), weekdays_only=True)
+    utc = lambda d, h, m: datetime(2026, 11, d, h, m, tzinfo=timezone.utc)  # noqa: E731
+    assert sender._cold_hold_reason(utc(16, 4, 0)) == ""            # Mon 09:30 IST
+    assert sender._cold_hold_reason(utc(16, 12, 29)) == ""          # Mon 17:59 IST
+    assert "window" in sender._cold_hold_reason(utc(16, 12, 30))    # Mon 18:00 IST
+    assert "window" in sender._cold_hold_reason(utc(16, 3, 59))     # Mon 09:29 IST
+    assert sender._cold_hold_reason(utc(21, 6, 0)) == "weekend"     # Sat 11:30 IST
+
+
+@pytest.mark.asyncio
+async def test_owner_test_addresses_ignore_the_window(state, monkeypatch):
+    pid, campaign = await seed(state)
+    pid2, campaign2 = await seed(state, email="owner@gmail.com")
+    provider = FakeProvider()
+    sender = make_sender(state, provider, window=("09:30", "18:00"), weekdays_only=True,
+                         exempt=["owner@gmail.com"])
+    monkeypatch.setattr(sender, "_cold_hold_reason", lambda now=None: "weekend")
+    for p, c, to in ((pid, campaign, "ravi@acmetech.in"), (pid2, campaign2, "owner@gmail.com")):
+        await state.add_outbox_item(prospect_id=p, campaign_id=c.id, step=1, to_email=to,
+                                    subject="Hosting for Acme", body="Hi,\n\nCall?",
+                                    send_at=_now().isoformat(), status="approved")
+    await sender._run_native()
+    assert [m["to"] for m in provider.sent] == ["owner@gmail.com"]   # real prospect waits
+
+
 # ── writer style ──
 
-REFERENCE_EMAIL_1 = """Hi Ravi,
+REFERENCE_EMAIL_1 = """Hi Haymant,
 
-I'm Haymant from CloudBox99, a Hyderabad-based cloud provider. Acme Tech builds logistics software for regional distributors.
+I came across Saras India's SharePoint and Office 365 work, both online and on-premises. Firms delivering that for clients usually need reliable servers and a dependable source for Microsoft licences.
 
-We help tech teams cut hosting costs and simplify IT: VPS and dedicated servers from ₹999/month, cloud migration, storage and backup, and 24x7 SOC and managed IT. Everything is billed in rupees, with local support.
+That's what we do at CloudBox99 in Hyderabad: Microsoft licensing, VPS and dedicated servers from ₹999/month, cloud migration, storage and backup, and 24x7 SOC and managed IT.
 
-Open to a 15-minute call this week?
+Would a 15-minute call this week make sense?
 
 Warm regards,"""
 
-# The brief's reference with its "[real detail]" left out (no detail found).
+# No detail found: a general line about the segment, claiming nothing about them.
 REFERENCE_EMAIL_1_NO_DETAIL = """Hi Ravi,
 
-I'm Haymant from CloudBox99, a Hyderabad-based cloud provider.
+Software teams usually need servers that cost less than the hyperscalers, with someone local to call.
 
-We help tech teams cut hosting costs and simplify IT: VPS and dedicated servers from ₹999/month, cloud migration, storage and backup, and 24x7 SOC and managed IT. Everything is billed in rupees, with local support.
+That's what we do at CloudBox99 in Hyderabad: VPS and dedicated servers from ₹999/month, cloud migration, Microsoft licensing, storage and backup, and 24x7 SOC and managed IT.
 
-Open to a 15-minute call this week?
+Would a 15-minute call this week make sense?
 
 Warm regards,"""
 
@@ -319,20 +347,31 @@ May I check back in a few months?
 
 Warm regards,"""
 
+SARAS = dict(industry="IT services / software",
+             detail="Saras India delivers SharePoint and Office 365 solutions.")
+
+
+def saras_services():
+    from harvey.agents.writer import segment_for, services_for, works_with_microsoft
+    return services_for(segment_for(SARAS["industry"]),
+                        microsoft=works_with_microsoft(SARAS["industry"], SARAS["detail"]))
+
 
 def test_segments_order_the_services():
-    from harvey.agents.writer import SERVICES, segment_for, services_for, services_sentence
+    from harvey.agents.writer import (SERVICES, segment_for, services_for, services_sentence,
+                                      works_with_microsoft)
     assert segment_for("SaaS startups")["key"] == "it"
     assert segment_for("diagnostic centres")["key"] == "health"
     assert segment_for("NBFCs")["key"] == "finance"
     assert segment_for("retail chains")["key"] == "mfg_retail"
     assert segment_for("D2C brands")["key"] == "ecommerce"
+    assert len(SERVICES) == 5 and SERVICES["microsoft"] == "Microsoft licensing"
     it = services_for(segment_for("software companies"))
     assert services_sentence(it) == ("VPS and dedicated servers from ₹999/month, cloud migration, "
-                                     "storage and backup, and 24x7 SOC and managed IT")
+                                     "Microsoft licensing, storage and backup, and 24x7 SOC and managed IT")
     clinic = services_for(segment_for("clinics"))
     assert clinic[0] == SERVICES["storage"]
-    assert sorted(clinic) == sorted(SERVICES.values())        # all four, once each
+    assert sorted(clinic) == sorted(SERVICES.values())        # all five, once each
     assert services_for(segment_for("banks"))[0] == SERVICES["managed"]
     # Industry outranks the description: a software firm serving manufacturers.
     assert segment_for("software companies",
@@ -341,14 +380,28 @@ def test_segments_order_the_services():
     assert segment_for("Coworking spaces")["key"] == "mfg_retail"   # multi-site premises
 
 
+def test_microsoft_companies_hear_about_licensing_first():
+    from harvey.agents.writer import SERVICES, segment_for, services_for, works_with_microsoft
+    for text in ("SharePoint portals", "Office 365 migrations", "Dynamics 365 partner",
+                 "Azure consulting", "a Microsoft Gold partner", "M365 rollouts"):
+        assert works_with_microsoft(text), text
+    for text in ("logistics software", "coworking spaces", "dental clinics", "Teamsters union"):
+        assert not works_with_microsoft(text), text
+    assert saras_services()[:3] == [SERVICES["microsoft"], SERVICES["vps"], SERVICES["migration"]]
+    banks = services_for(segment_for("banks"), microsoft=True)
+    assert banks[:2] == [SERVICES["microsoft"], SERVICES["managed"]]
+    assert sorted(banks) == sorted(SERVICES.values())
+
+
 def test_reference_drafts_pass_the_style_checks():
     from harvey.agents.writer import (
         FIRST_EMAIL_MAX_WORDS, FOLLOWUP_MAX_WORDS, first_email_problems,
-        followup_problems, segment_for, services_for)
+        followup_problems, segment_for, services_for, _subject_problems)
     from harvey.signature import strip_signature
-    services = services_for(segment_for("software companies"))
-    assert first_email_problems(REFERENCE_EMAIL_1, "Ravi", services) == []
-    assert first_email_problems(REFERENCE_EMAIL_1_NO_DETAIL, "Ravi", services) == []
+    assert first_email_problems(REFERENCE_EMAIL_1, "Haymant", saras_services()) == []
+    assert first_email_problems(REFERENCE_EMAIL_1_NO_DETAIL, "Ravi",
+                                services_for(segment_for("software companies"))) == []
+    assert _subject_problems("Microsoft licensing & hosting for Saras India") == []
     assert followup_problems(REFERENCE_FU1, 2) == []
     assert followup_problems(REFERENCE_FU2, 3) == []
     assert (FIRST_EMAIL_MAX_WORDS, FOLLOWUP_MAX_WORDS) == (70, {2: 40, 3: 25})
@@ -358,24 +411,42 @@ def test_reference_drafts_pass_the_style_checks():
 def test_style_checks_catch_violations():
     from harvey.agents.writer import (
         first_email_problems, followup_problems, segment_for, services_for)
-    services = services_for(segment_for("software companies"))
-    check = lambda body, svc=services: first_email_problems(body, "Ravi", svc)  # noqa: E731
-    assert any("banned" in p for p in check(REFERENCE_EMAIL_1.replace("cloud migration", "free migration")))
-    assert any("order" in p for p in check(REFERENCE_EMAIL_1, services_for(segment_for("banks"))))
-    assert any("filler" in p for p in check(REFERENCE_EMAIL_1.replace("I'm Haymant", "Good morning. I'm Haymant")))
-    assert any("filler" in p for p in check(REFERENCE_EMAIL_1.replace("I'm Haymant", "Hope you are well. I'm Haymant")))
-    assert any("links" in p for p in check(REFERENCE_EMAIL_1.replace("local support.", "local support: https://cloudbox99.com")))
-    assert any("rupees" in p for p in check(REFERENCE_EMAIL_1.replace("billed in rupees", "billed monthly")))
-    assert any("15-minute" in p for p in check(REFERENCE_EMAIL_1.replace("a 15-minute call", "a call")))
-    long = REFERENCE_EMAIL_1.replace("regional distributors.", "regional distributors " + "across many states " * 3 + ".")
+    services = saras_services()
+    check = lambda body, svc=services: first_email_problems(body, "Haymant", svc)  # noqa: E731
+    ref = REFERENCE_EMAIL_1
+    assert any("banned" in p for p in check(ref.replace("cloud migration", "free migration")))
+    assert any("order" in p for p in check(ref, services_for(segment_for("banks"))))
+    assert any("filler" in p for p in check(ref.replace("I came across", "Good morning. I came across")))
+    assert any("filler" in p for p in check(ref.replace("I came across", "Hope you are well. I came across")))
+    assert any("I'm Haymant" in p for p in check(ref.replace("I came across", "I'm Haymant from CloudBox99. I came across")))
+    assert any("rupee" in p for p in check(ref.replace("managed IT.", "managed IT, billed in rupees.")))
+    assert any("rupee" in p for p in check(ref.replace("managed IT.", "managed IT. INR invoices.")))
+    assert any("That's what we do" in p for p in check(ref.replace("That's what we do at CloudBox99 in Hyderabad:", "We offer")))
+    assert check(ref.replace("That's", "That’s")) == []                 # curly apostrophe is fine
+    assert any("phrases exactly" in p for p in check(ref.replace("Microsoft licensing, VPS", "VPS")))
+    assert any("links" in p for p in check(ref.replace("this week", "this week (https://cloudbox99.com)")))
+    assert any("15-minute" in p for p in check(ref.replace("a 15-minute call", "a call")))
+    long = ref.replace("on-premises.", "on-premises " + "across many states " * 3 + ".")
     assert any("under 70 words" in p for p in check(long))
-    listed = REFERENCE_EMAIL_1.replace("We help", "- We help")
-    assert any("lists" in p for p in check(listed))
+    assert any("lists" in p for p in check(ref.replace("That's what", "- That's what")))
     assert any("filler" in p for p in followup_problems(REFERENCE_FU1.replace("An easy", "Hope your week is going well. An easy"), 2))
     assert any("repeat the services" in p for p in followup_problems(REFERENCE_FU1.replace("to compare cost", "from ₹999/month"), 2))
+    assert any("rupee" in p for p in followup_problems(REFERENCE_FU1.replace("to compare cost", "billed in rupees"), 2))
     assert any("under 25" in p for p in followup_problems(REFERENCE_FU2.replace("later,", "later, or backups, or IT support, or migration,"), 3))
     two_q = REFERENCE_FU2.replace("Last note from me.", "Last note from me. Busy week?")
     assert any("one question" in p for p in followup_problems(two_q, 3))
+
+
+def test_paragraphs_are_one_line_each():
+    from harvey.signature import apply_signature, unwrap_paragraphs
+    wrapped = "Hi Ravi,\n\nI came across Acme's work on\nlogistics software for\ndistributors.\n\nOpen to a call?"
+    assert unwrap_paragraphs(wrapped) == ("Hi Ravi,\n\nI came across Acme's work on logistics "
+                                          "software for distributors.\n\nOpen to a call?")
+    persona = NS(signature=SIG, name="Haymant Yerneni")
+    signed = apply_signature(wrapped, persona)
+    assert "work on logistics software for distributors." in signed
+    assert signed.endswith("Warm regards,\n" + SIG)                  # signature keeps its lines
+    assert apply_signature(signed, persona) == signed                 # still idempotent
 
 
 def test_parse_sequence_fixes_the_cadence():
@@ -411,9 +482,10 @@ async def test_personal_email_is_regenerated_until_it_follows_the_rules(state):
     cfg = make_config(window=("09:30", "12:00"))
     brain = Brain()
     writer = Writer(brain=brain, state=state, config=cfg)
-    prospect = Prospect(first_name="Ravi", last_name="K", title="CTO",
-                        company="Acme Tech", industry="software companies",
-                        email="ravi@acmetech.in")
+    prospect = Prospect(first_name="Haymant", last_name="Y", title="Founder",
+                        company="Saras India", industry=SARAS["industry"],
+                        personalization_notes=SARAS["detail"],
+                        email="haymant@sarasindia.com")
     draft = await writer._write_personal_email(prospect)
     assert draft["body"] == REFERENCE_EMAIL_1
     assert len(brain.calls) == 2
