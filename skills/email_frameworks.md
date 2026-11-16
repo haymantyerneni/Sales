@@ -42,7 +42,7 @@ Style rules are negotiable. These are not:
    - Cloud migration from AWS, Azure or on-premise, handled end to end by our engineers
    - Cloud storage and backup
    - EyeCloud: encrypted cloud storage for CCTV footage
-   - Managed IT, cybersecurity and SOC monitoring
+   - Managed IT, cybersecurity and 24x7 SOC monitoring
    - Microsoft licensing
 6. Offer a short 15-minute call, with exactly ONE question.
 7. "Warm regards," (the signature is added automatically).
@@ -70,7 +70,7 @@ We help growing businesses across India keep their servers, data and IT running 
 - Cloud migration from AWS, Azure or on-premise, handled end to end by our engineers
 - Cloud storage and backup
 - EyeCloud: encrypted cloud storage for CCTV footage
-- Managed IT, cybersecurity and SOC monitoring
+- Managed IT, cybersecurity and 24x7 SOC monitoring
 - Microsoft licensing
 
 If any of this would help Acme Tech, I'd be glad to set up a short 15-minute call to understand your current setup and suggest what fits.

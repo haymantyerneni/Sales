@@ -292,7 +292,7 @@ We help growing businesses across India keep their servers, data and IT running 
 - Cloud migration from AWS, Azure or on-premise, handled end to end by our engineers
 - Cloud storage and backup
 - EyeCloud: encrypted cloud storage for CCTV footage
-- Managed IT, cybersecurity and SOC monitoring
+- Managed IT, cybersecurity and 24x7 SOC monitoring
 - Microsoft licensing
 
 If any of this would help Acme Tech, I'd be glad to set up a short 15-minute call to understand your current setup and suggest what fits.
@@ -337,6 +337,7 @@ def test_segments_order_the_services_list():
     assert segment_for("software companies",
                        "builds billing software for small manufacturers")["key"] == "it"
     assert segment_for("", "a chain of diagnostic labs")["key"] == "health"
+    assert segment_for("Coworking spaces")["key"] == "mfg_retail"   # multi-site premises
 
 
 def test_reference_drafts_pass_the_style_checks():

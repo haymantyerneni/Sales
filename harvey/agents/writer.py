@@ -51,7 +51,7 @@ SERVICES = {
     "migration": "Cloud migration from AWS, Azure or on-premise, handled end to end by our engineers",
     "storage": "Cloud storage and backup",
     "eyecloud": "EyeCloud: encrypted cloud storage for CCTV footage",
-    "managed": "Managed IT, cybersecurity and SOC monitoring",
+    "managed": "Managed IT, cybersecurity and 24x7 SOC monitoring",
     "microsoft": "Microsoft licensing",
 }
 
@@ -83,8 +83,8 @@ SEGMENTS = (
         "start": "moving the store or website onto a faster VPS",
     },
     {
-        "key": "mfg_retail", "label": "Manufacturing / retail chains",
-        "keywords": ("manufactur", "factory", "industrial", "industries", "retail",
+        "key": "mfg_retail", "label": "Manufacturing / retail chains / multi-site premises",
+        "keywords": ("manufactur", "factory", "industrial", "industries", "retail", "cowork",
                      "supermarket", "showroom", "warehouse", "textile", "pharma manufact"),
         "lead": ("eyecloud", "managed"),
         "angle": "EyeCloud for multi-site CCTV, plus backup and managed IT",

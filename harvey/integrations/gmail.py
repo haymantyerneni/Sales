@@ -286,14 +286,22 @@ def run_auth_flow(client_id: str, client_secret: str) -> bool:
             if query.get("state", [""])[0] != state:
                 self.send_response(400); self.end_headers()
                 return
+            if done.is_set():  # a repeat hit (reload, prefetch) after the real one
+                self.send_response(200); self.end_headers()
+                return
             result["code"] = query.get("code", [""])[0]
             result["error"] = query.get("error", [""])[0]
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.end_headers()
-            self.wfile.write(
-                b"<h2>Harvey is connected to Gmail.</h2>You can close this tab.")
+            # Record success before writing the page: a browser that drops
+            # the connection mid-write must not lose a valid code.
             done.set()
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(
+                    b"<h2>Harvey is connected to Gmail.</h2>You can close this tab.")
+            except OSError:
+                pass
 
         def log_message(self, *args):
             pass
